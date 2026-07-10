@@ -8,6 +8,7 @@
 
 - Python 3.9 以上（僅用標準函式庫，不需要 `pip install` 任何東西）
 - Windows / macOS / Linux 皆可（`啟動.bat` 僅限 Windows 雙擊使用）
+- **不想裝 Python？** 見下方「免安裝版（Windows）」
 
 ## 如何啟動
 
@@ -21,6 +22,15 @@ python server.py
 然後瀏覽器開啟 `http://localhost:8787/`。
 
 關閉伺服器只要關掉終端機視窗，或按 `Ctrl+C`。
+
+**免安裝版（Windows）：**
+如果對方電腦沒有裝 Python，可以用 PyInstaller 打包好的版本，不需要裝任何東西：
+
+1. 到本 repo 的 [Releases](../../releases) 頁面下載最新的 `台股分析工具-免安裝版.zip`
+2. 解壓縮後，資料夾裡會有 `台股分析工具.exe` 和 `static/` 資料夾（兩者要放在同一層，不能分開）
+3. 雙擊 `台股分析工具.exe`，會自動開啟終端機視窗並開啟瀏覽器連到 `http://localhost:8787/`
+
+免安裝版是把 Python 直譯器一起打包進執行檔，檔案較大（約 9MB）。程式碼有更新時需要重新打包，不會自動更新。
 
 ## 功能
 

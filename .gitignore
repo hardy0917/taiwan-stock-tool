@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 tdcc_snapshots.json
+build/
+dist/
+*.spec
+*.zip

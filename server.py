@@ -5,8 +5,10 @@
 然後開啟瀏覽器: http://localhost:8787
 """
 import json
+import sys
 import time
 import threading
+import webbrowser
 import urllib.request
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,7 +16,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PORT = 8787
-STATIC_DIR = Path(__file__).parent / "static"
+# 打包成 .exe（PyInstaller）執行時，用執行檔所在目錄找 static/；
+# 用 python server.py 執行時，用這支程式所在目錄找 static/。
+BASE_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+STATIC_DIR = BASE_DIR / "static"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; TaiwanStockTool/1.0)"}
 
 # 簡單快取，避免短時間內重複打證交所 API
@@ -313,7 +318,7 @@ def fetch_intraday(code):
 
 # ---------- 大戶持股（集保股權分散表，每週更新）----------
 
-TDCC_SNAPSHOT_FILE = Path(__file__).parent / "tdcc_snapshots.json"
+TDCC_SNAPSHOT_FILE = BASE_DIR / "tdcc_snapshots.json"
 BIG_HOLDER_BRACKET = "15"  # TDCC 標準持股分級：15 = 1,000,001股以上，一般俗稱「大戶（1,000張以上）」
 TOTAL_BRACKET = "17"       # 17 = 全體合計（用來算佔比基準）
 _tdcc_lock = threading.Lock()
@@ -932,9 +937,17 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"台股分析工具已啟動: http://localhost:{PORT}")
-    print("按 Ctrl+C 停止伺服器")
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    except OSError:
+        print(f"啟動失敗：連接埠 {PORT} 已被佔用（可能已經有一個伺服器在跑了）。")
+        print(f"請直接開啟瀏覽器連到 http://localhost:{PORT} ，或關閉舊的視窗後再試一次。")
+        input("按 Enter 鍵關閉視窗...")
+        return
+    url = f"http://localhost:{PORT}"
+    print(f"台股分析工具已啟動: {url}")
+    print("按 Ctrl+C 停止伺服器（關閉這個視窗也會停止）")
+    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     server.serve_forever()
 
 
