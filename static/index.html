@@ -133,6 +133,12 @@
   #tooltip .t-row .key { display: flex; align-items: center; gap: 5px; color: var(--text-secondary); }
   #tooltip .t-row .swatch { width: 10px; height: 2px; display: inline-block; }
   #tooltip .t-row .val { font-weight: 700; }
+  #rangeHint {
+    position: absolute; top: 8px; right: 8px; pointer-events: none;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
+    padding: 3px 9px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12); display: none;
+  }
 
   #chartLegend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; flex-wrap: wrap; }
   #chartLegend .item { display: flex; align-items: center; gap: 5px; }
@@ -302,6 +308,9 @@
       <button data-months="3" class="active">3個月</button>
       <button data-months="6">6個月</button>
       <button data-months="12">1年</button>
+      <button data-months="60">5年</button>
+      <button data-months="120">10年</button>
+      <button data-months="240">20年</button>
       <label style="display:flex; align-items:center; gap:5px; font-size:12.5px; color:var(--text-secondary); cursor:pointer; margin-left:4px">
         <input type="checkbox" id="bollingerToggle">
         布林通道（20,2）
@@ -311,6 +320,7 @@
   <div id="chartWrap">
     <svg id="chart" viewBox="0 0 900 260" preserveAspectRatio="none"></svg>
     <div id="tooltip"></div>
+    <div id="rangeHint"></div>
   </div>
   <div id="chartLegend"></div>
   <div id="analysisPanel"></div>

@@ -980,16 +980,68 @@
     document.querySelector("#chartTitle").closest("section").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  // 區間按鈕的月數階梯，滑鼠滾輪縮放時也沿用同一組數值（1個月～20年）
+  const RANGE_LADDER = [1, 2, 3, 6, 12, 24, 36, 60, 120, 240];
+
+  function monthsLabel(m) {
+    if (m < 12) return `${m}個月`;
+    const y = m / 12;
+    return `${Number.isInteger(y) ? y : y.toFixed(1)}年`;
+  }
+
+  function applyRangeButtons() {
+    document.querySelectorAll(".ranges button[data-months]").forEach((b) => {
+      b.classList.toggle("active", parseInt(b.dataset.months, 10) === state.months);
+    });
+    $("#intradayBtn").classList.remove("active");
+  }
+
+  function switchToMonths(months) {
+    state.viewMode = "daily";
+    state.months = months;
+    applyRangeButtons();
+    if (state.selectedIsIndex) loadIndexChart(state.selectedIndexKey, state.selectedName);
+    else if (state.selectedCode) loadChart(state.selectedCode);
+  }
+
   document.querySelectorAll(".ranges button[data-months]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".ranges button").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      state.viewMode = "daily";
-      state.months = parseInt(btn.dataset.months, 10);
+    btn.addEventListener("click", () => switchToMonths(parseInt(btn.dataset.months, 10)));
+  });
+
+  // 在走勢圖上滾滑鼠滾輪可以連續縮放時間區間，不用一直找按鈕點
+  const rangeHint = $("#rangeHint");
+  let wheelAccum = 0;
+  let wheelHideTimer = null;
+  let wheelFetchTimer = null;
+
+  $("#chartWrap").addEventListener("wheel", (e) => {
+    if (state.viewMode === "intraday" || (!state.selectedCode && !state.selectedIsIndex)) return;
+    e.preventDefault();
+    wheelAccum += e.deltaY;
+    const STEP = 60;
+    if (Math.abs(wheelAccum) < STEP) return;
+    const dir = wheelAccum > 0 ? 1 : -1; // 往下滾＝拉長區間，往上滾＝縮短
+    wheelAccum = 0;
+
+    let idx = RANGE_LADDER.reduce((closest, v, i) =>
+      Math.abs(v - state.months) < Math.abs(RANGE_LADDER[closest] - state.months) ? i : closest, 0);
+    idx = Math.min(RANGE_LADDER.length - 1, Math.max(0, idx + dir));
+    const months = RANGE_LADDER[idx];
+    if (months === state.months) return;
+
+    state.months = months;
+    state.viewMode = "daily";
+    applyRangeButtons();
+    rangeHint.textContent = monthsLabel(months);
+    rangeHint.style.display = "block";
+    clearTimeout(wheelHideTimer);
+    clearTimeout(wheelFetchTimer);
+    wheelFetchTimer = setTimeout(() => {
       if (state.selectedIsIndex) loadIndexChart(state.selectedIndexKey, state.selectedName);
       else if (state.selectedCode) loadChart(state.selectedCode);
-    });
-  });
+      wheelHideTimer = setTimeout(() => { rangeHint.style.display = "none"; }, 1200);
+    }, 250);
+  }, { passive: false });
 
   $("#intradayBtn").addEventListener("click", () => {
     if (state.selectedIsIndex) return; // 指數目前不支援分時走勢

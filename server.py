@@ -248,19 +248,23 @@ INDEX_SYMBOLS = {
 }
 
 
-def fetch_index_daily_rows(key, months=3):
-    """把 Yahoo Finance 的指數日線資料轉成跟 STOCK_DAY 一樣的 row 格式，
+def _yahoo_range_str(months):
+    """把「月數」換算成 Yahoo Finance chart API 的 range 參數。
+    超過 10 年一律用 max，一次拿到該標的全部可查歷史（Yahoo 單次請求即可回傳，
+    比 TWSE STOCK_DAY 逐月請求快非常多，也才有辦法支援長達 20 年的區間。"""
+    months = max(months, 1)
+    if months <= 24:
+        return f"{months}mo"
+    years = -(-months // 12)  # 無條件進位
+    return f"{years}y" if years <= 10 else "max"
+
+
+def _yahoo_chart_result_to_rows(data):
+    """把 Yahoo Finance chart API 的回應轉成跟 TWSE STOCK_DAY 一樣的 row 格式，
     這樣前端可以直接沿用個股走勢圖同一套解析／繪圖邏輯。"""
-    entry = INDEX_SYMBOLS.get(key)
-    if not entry:
-        return None, None
-    symbol, display_name = entry
-    range_str = f"{min(max(months, 1), 24)}mo" if months <= 24 else "5y"
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}?interval=1d&range={range_str}"
-    data = fetch_json(url, ttl=300)
     result = ((data.get("chart") or {}).get("result")) or []
     if not result:
-        return display_name, []
+        return []
     r0 = result[0]
     timestamps = r0.get("timestamp") or []
     quote0 = ((r0.get("indicators") or {}).get("quote") or [{}])[0]
@@ -283,7 +287,34 @@ def fetch_index_daily_rows(key, months=3):
         v = volumes[i] if i < len(volumes) and volumes[i] is not None else 0
         rows.append([roc_date, str(int(v)), "", str(round(o, 2)), str(round(h, 2)),
                      str(round(l, 2)), str(round(c, 2)), "", "", ""])
-    return display_name, rows
+    return rows
+
+
+def fetch_index_daily_rows(key, months=3):
+    entry = INDEX_SYMBOLS.get(key)
+    if not entry:
+        return None, None
+    symbol, display_name = entry
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(symbol)}"
+           f"?interval=1d&range={_yahoo_range_str(months)}")
+    data = fetch_json(url, ttl=300)
+    return display_name, _yahoo_chart_result_to_rows(data)
+
+
+def fetch_stock_daily_rows(code, months=3):
+    """透過 Yahoo Finance 一次性抓個股日線資料（單一請求，取代 TWSE STOCK_DAY
+    逐月請求的作法），速度快很多，也才能支援數年～數十年的長期區間。"""
+    range_str = _yahoo_range_str(months)
+    for suffix in (".TW", ".TWO"):
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{code}{suffix}?interval=1d&range={range_str}"
+        try:
+            data = fetch_json(url, ttl=300)
+        except Exception:
+            continue
+        rows = _yahoo_chart_result_to_rows(data)
+        if rows:
+            return rows
+    return []
 
 
 def fetch_intraday(code):
@@ -869,7 +900,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not code:
                     self._send_json({"error": "missing code"}, 400)
                     return
-                rows = fetch_history_rows(code, months=months)
+                rows = fetch_stock_daily_rows(code, months=months)
                 self._send_json({"code": code, "rows": rows})
                 return
 
