@@ -1243,7 +1243,7 @@
 
     screenerBody.innerHTML = "";
     if (!rows.length) {
-      screenerBody.innerHTML = `<tr><td colspan="19" class="empty">沒有符合條件的股票</td></tr>`;
+      screenerBody.innerHTML = `<tr><td colspan="21" class="empty">沒有符合條件的股票</td></tr>`;
       return;
     }
     for (const r of rows) {
@@ -1306,6 +1306,13 @@
       tr.appendChild(textCell(
         r.eps !== null && r.eps !== undefined ? `${fmtNum(r.eps)}（${r.eps_period}）` : "-"
       ));
+      const peTd = textCell(r.pe_ratio != null ? fmtNum(r.pe_ratio) : "-");
+      if (r.pe_high) {
+        peTd.className = "neg";
+        peTd.title = "本益比超過 40 倍，評分已扣分提醒估值偏高";
+      }
+      tr.appendChild(peTd);
+      tr.appendChild(textCell(r.dividend_yield != null ? `${fmtNum(r.dividend_yield)}%` : "-"));
 
       const badgeCell = document.createElement("td");
       badgeCell.style.textAlign = "left";
@@ -1336,7 +1343,14 @@
         b.title = "近20日籌碼明顯偏多，但營收年增卻明顯衰退，買盤可能是題材面而非基本面";
         badgeCell.appendChild(b);
       }
-      if (!r.is_disposition && !r.is_attention && !r.distribution_risk && !r.chip_revenue_divergence) badgeCell.textContent = "-";
+      if (r.pe_high) {
+        const b = document.createElement("span");
+        b.className = "badge attention";
+        b.textContent = "本益比偏高";
+        b.title = "本益比超過 40 倍，估值相對偏貴，可能是題材／成長性溢價";
+        badgeCell.appendChild(b);
+      }
+      if (!r.is_disposition && !r.is_attention && !r.distribution_risk && !r.chip_revenue_divergence && !r.pe_high) badgeCell.textContent = "-";
       tr.appendChild(badgeCell);
 
       tr.addEventListener("click", () => selectStock(r.code, r.name));
@@ -1351,9 +1365,9 @@
     const minTradeValueWan = parseFloat($("#screenerMinTradeValue").value) || 0;
     const btn = $("#runScreenerBtn");
     btn.disabled = true;
-    const waitHint = longTerm ? "首次掃描含長期分析可能需要 1-2 分鐘…" : "首次掃描可能需要 10-30 秒…";
+    const waitHint = longTerm ? "首次掃描含長期分析可能需要 30-90 秒…" : "首次掃描可能需要 30-60 秒…";
     screenerStatus.innerHTML = `<span class="spinner"></span>掃描全市場中，${waitHint}`;
-    screenerBody.innerHTML = `<tr><td colspan="19" class="empty">掃描中…</td></tr>`;
+    screenerBody.innerHTML = `<tr><td colspan="21" class="empty">掃描中…</td></tr>`;
     try {
       const res = await fetch(`/api/screener?pct=${pct}&trend_days=${trendDays}&long_term=${longTerm ? 1 : 0}&min_trade_value_wan=${minTradeValueWan}`);
       const data = await res.json();
@@ -1365,7 +1379,7 @@
         `掃描 ${data.candidates_scanned} 檔候選股，符合條件 ${screenerResults.length} 檔・更新於 ${data.generated_at}`;
     } catch (err) {
       screenerStatus.textContent = "掃描失敗，請稍後再試";
-      screenerBody.innerHTML = `<tr><td colspan="19" class="empty">掃描失敗</td></tr>`;
+      screenerBody.innerHTML = `<tr><td colspan="21" class="empty">掃描失敗</td></tr>`;
       console.error(err);
     } finally {
       btn.disabled = false;
@@ -1656,7 +1670,14 @@
         b.className = "badge attention";
         b.textContent = "⚠ 籌碼營收背離";
         badgeCell.appendChild(b);
-      } else {
+      }
+      if (r.pe_high) {
+        const b = document.createElement("span");
+        b.className = "badge attention";
+        b.textContent = "本益比偏高";
+        badgeCell.appendChild(b);
+      }
+      if (!r.chip_revenue_divergence && !r.pe_high) {
         badgeCell.textContent = "-";
       }
       tr.appendChild(badgeCell);
@@ -1705,7 +1726,7 @@
     const btn = $("#genDailyWatchlistBtn");
     dailyWatchlistGenerated = true;
     btn.disabled = true;
-    dailyWatchlistStatus.textContent = "產生中，掃描全市場並檢查處置股回檔中，可能需要 10-30 秒…";
+    dailyWatchlistStatus.textContent = "產生中，掃描全市場並檢查處置股回檔中，可能需要 30-60 秒…";
     dailyWatchlistStatus.style.display = "block";
     dailyWatchlistTable.style.display = "none";
     try {

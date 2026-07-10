@@ -110,28 +110,6 @@ def safe_float(v, default=None):
         return default
 
 
-def fetch_history_rows(code, months=2):
-    """抓個股近 N 個月的日成交資訊（STOCK_DAY），回傳依日期由舊到新排序的 rows"""
-    today = time.localtime()
-    rows = []
-    y, m = today.tm_year, today.tm_mon
-    for _ in range(months):
-        date_str = f"{y:04d}{m:02d}01"
-        url = (f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
-               f"?date={date_str}&stockNo={code}&response=json")
-        try:
-            d = fetch_json(url, ttl=1800)
-            if d.get("stat") == "OK":
-                rows = d.get("data", []) + rows
-        except Exception:
-            pass
-        m -= 1
-        if m == 0:
-            m = 12
-            y -= 1
-    return rows
-
-
 def compute_ma20_series(rows):
     """rows: STOCK_DAY 的 data 陣列（[日期,量,額,開,高,低,收,漲跌,筆數,註記]）
     回傳依日期排序的 20 日均線（月線）數值序列"""
@@ -285,7 +263,10 @@ def _yahoo_chart_result_to_rows(data):
         h = highs[i] if i < len(highs) and highs[i] is not None else c
         l = lows[i] if i < len(lows) and lows[i] is not None else c
         v = volumes[i] if i < len(volumes) and volumes[i] is not None else 0
-        rows.append([roc_date, str(int(v)), "", str(round(o, 2)), str(round(h, 2)),
+        # Yahoo 沒有直接提供成交金額欄位，用「成交量 × 收盤價」估算，
+        # 供流動性過濾等只需要量級（而非精確金額）的用途使用。
+        value_est = round(v * c)
+        rows.append([roc_date, str(int(v)), str(value_est), str(round(o, 2)), str(round(h, 2)),
                      str(round(l, 2)), str(round(c, 2)), "", "", ""])
     return rows
 
@@ -573,6 +554,24 @@ def fetch_eps():
     return out
 
 
+def fetch_valuation():
+    """全上市股票每日本益比／殖利率／股價淨值比彙總表（單一請求抓全市場，
+    不用逐檔查）。PEratio 空字串代表當期無法計算本益比（例如近四季虧損）。"""
+    url = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
+    data = fetch_json(url, ttl=3600)
+    out = {}
+    for row in data:
+        code = row.get("Code", "")
+        if not code:
+            continue
+        out[code] = {
+            "pe_ratio": safe_float(row.get("PEratio")),
+            "dividend_yield": safe_float(row.get("DividendYield")),
+            "pb_ratio": safe_float(row.get("PBratio")),
+        }
+    return out
+
+
 def fetch_disposition():
     """集中市場公布處置股票"""
     url = "https://openapi.twse.com.tw/v1/announcement/punish"
@@ -598,7 +597,7 @@ def fetch_disposition_pullback_watch(level_threshold=5.0):
         return []
 
     def check_one(code, info):
-        rows = fetch_history_rows(code, months=3)
+        rows = fetch_stock_daily_rows(code, months=3)
         boll = compute_bollinger_now(rows)
         if not boll or boll["level"] > level_threshold:
             return None
@@ -647,7 +646,7 @@ MIN_RELIABLE_HOLDERS = 5  # 大戶人數低於此門檻時，樣本太小、變�
 def compute_long_term_bull_pct(code, years=2):
     """近 N 年裡，收盤價站上 20 日均線（月線）的交易日比例——
     用來大致衡量這檔股票長期是否傾向多頭（比單純看近 10 天更能反映長期走法）"""
-    rows = fetch_history_rows(code, months=years * 12 + 1)
+    rows = fetch_stock_daily_rows(code, months=years * 12 + 1)
     closes = [safe_float(r[6]) for r in rows if safe_float(r[6]) is not None]
     ma20 = compute_ma20_series(rows)
     if not ma20:
@@ -686,7 +685,7 @@ def run_screener(pct_threshold=5.0, trend_days=10, long_term=False, min_trade_va
 
     def check_trend(item):
         code, v, _rough_proximity = item
-        rows = fetch_history_rows(code, months=history_months)
+        rows = fetch_stock_daily_rows(code, months=history_months)
         closes = [safe_float(r[6]) for r in rows if safe_float(r[6]) is not None]
         ma20 = compute_ma20_series(rows)
         if len(ma20) <= trend_days or not closes:
@@ -733,6 +732,7 @@ def run_screener(pct_threshold=5.0, trend_days=10, long_term=False, min_trade_va
 
     revenue_map = fetch_monthly_revenue()
     eps_map = fetch_eps()
+    valuation_map = fetch_valuation()
     disposition_map = fetch_disposition()
     attention_set = fetch_attention()
     try:
@@ -754,6 +754,11 @@ def run_screener(pct_threshold=5.0, trend_days=10, long_term=False, min_trade_va
         r["is_disposition"] = disp is not None
         r["disposition_reason"] = disp["reason"] if disp else None
         r["is_attention"] = code in attention_set
+
+        val = valuation_map.get(code, {})
+        r["pe_ratio"] = val.get("pe_ratio")
+        r["dividend_yield"] = val.get("dividend_yield")
+        r["pb_ratio"] = val.get("pb_ratio")
 
         holder = holder_map.get(code, {})
         r["holders_1000"] = holder.get("holders_1000")
@@ -782,6 +787,13 @@ def run_screener(pct_threshold=5.0, trend_days=10, long_term=False, min_trade_va
             score += 1
         if r["ma20_slope_pct"] > 3:
             score += 1
+        # 本益比：沒有「絕對合理值」，這裡只用寬鬆的門檻標示相對便宜／偏貴，
+        # 缺值（近四季虧損等）不加分也不扣分，避免誤把轉機股當成地雷股
+        r["pe_high"] = r["pe_ratio"] is not None and r["pe_ratio"] > 40
+        if r["pe_ratio"] is not None and 0 < r["pe_ratio"] <= 20:
+            score += 1
+        elif r["pe_high"]:
+            score -= 1
         if r["chip_revenue_divergence"]:
             score -= 2  # 籌碼買超但營收衰退：視為警訊，不給籌碼加分，額外倒扣
         elif r["chip_bias_20"] is not None and r["chip_bias_20"] > 0:
