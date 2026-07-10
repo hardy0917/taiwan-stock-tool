@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股分析工具</title>
+<style>
+  :root {
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6;
+    --ma5:            #2a78d6;
+    --ma20:           #4a3aa7;
+    --ma60:           #eb6834;
+    --up:             #d03b3b;
+    --down:           #0ca30c;
+    --chip-bg:        #f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+      --ma5:            #3987e5;
+      --ma20:           #9085e9;
+      --ma60:           #d95926;
+      --up:             #e66767;
+      --down:           #1baf7a;
+      --chip-bg:        #26261f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  body { padding: 24px; max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--text-secondary); font-weight: 600; }
+  header.top {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 20px; flex-wrap: wrap; gap: 8px;
+  }
+  #lastUpdated { font-size: 12px; color: var(--text-muted); }
+  #indicesBar { flex-basis: 100%; display: flex; justify-content: flex-end; gap: 14px; flex-wrap: wrap; font-size: 12px; }
+  #indicesBar .idx-item { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+  #indicesBar .idx-name { color: var(--text-muted); }
+  #indicesBar .idx-price { font-weight: 600; font-variant-numeric: tabular-nums; }
+  #indicesBar .idx-chg { font-variant-numeric: tabular-nums; }
+  button {
+    font-family: inherit; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-primary); border-radius: 6px; padding: 6px 12px;
+  }
+  button:hover { background: var(--chip-bg); }
+  button.primary { background: var(--series-1); color: #fff; border-color: transparent; }
+  input[type=text] {
+    font-family: inherit; font-size: 13px; padding: 6px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-1); color: var(--text-primary);
+  }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 20px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row.between { justify-content: space-between; }
+
+  /* watchlist */
+  #watchlistForm { margin-bottom: 14px; }
+  #tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+  .tile {
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    cursor: pointer; position: relative; background: var(--page);
+  }
+  .tile:hover { border-color: var(--series-1); }
+  .tile.selected { border-color: var(--series-1); box-shadow: 0 0 0 1px var(--series-1) inset; }
+  .tile .code { font-size: 11px; color: var(--text-muted); }
+  .tile .name { font-size: 13px; font-weight: 600; margin: 2px 0 6px; }
+  .tile .price { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .tile .delta { font-size: 12px; font-variant-numeric: tabular-nums; display:flex; align-items:center; gap:3px; }
+  .tile .rm {
+    position: absolute; top: 6px; right: 6px; font-size: 11px; color: var(--text-muted);
+    background: none; border: none; padding: 2px 5px; line-height: 1;
+  }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .flat { color: var(--text-muted); }
+
+  /* chart */
+  #chartTitle { font-size: 14px; font-weight: 600; }
+  #chartMeta { font-size: 12px; color: var(--text-muted); }
+  .ranges button.active { background: var(--series-1); color: #fff; border-color: transparent; }
+  #chartWrap { position: relative; margin-top: 10px; }
+  svg#chart { width: 100%; height: 260px; display: block; overflow: visible; }
+  .gridline { stroke: var(--gridline); stroke-width: 1; }
+  .baseline { stroke: var(--baseline); stroke-width: 1; }
+  .price-area { fill: var(--text-muted); opacity: 0.05; }
+  .ma5-line { fill: none; stroke: var(--ma5); stroke-width: 2; }
+  .ma20-line { fill: none; stroke: var(--ma20); stroke-width: 2; }
+  .ma60-line { fill: none; stroke: var(--ma60); stroke-width: 2; }
+  .end-dot { fill: var(--series-1); }
+  .candle-wick.up { stroke: var(--up); }
+  .candle-wick.down { stroke: var(--down); }
+  .candle-body.up { fill: var(--up); }
+  .candle-body.down { fill: var(--down); }
+  .candle-body.flat { fill: var(--text-muted); }
+  .boll-line { fill: none; stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.85; }
+  .boll-fill { fill: var(--text-muted); opacity: 0.05; }
+  .crosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .axis-label { fill: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+  #tooltip {
+    position: absolute; pointer-events: none; background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+    font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; white-space: nowrap;
+  }
+  #tooltip .t-date { color: var(--text-muted); margin-bottom: 4px; }
+  #tooltip .t-row { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
+  #tooltip .t-row .key { display: flex; align-items: center; gap: 5px; color: var(--text-secondary); }
+  #tooltip .t-row .swatch { width: 10px; height: 2px; display: inline-block; }
+  #tooltip .t-row .val { font-weight: 700; }
+
+  #chartLegend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; flex-wrap: wrap; }
+  #chartLegend .item { display: flex; align-items: center; gap: 5px; }
+  #chartLegend .swatch { width: 14px; height: 2px; display: inline-block; }
+  #chartLegend .swatch.block { width: 10px; height: 10px; border-radius: 2px; }
+
+  /* technical analysis panel */
+  #analysisPanel { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--gridline); font-size: 13px; display: none; }
+  #analysisPanel .align-badge { display: inline-block; font-size: 12px; padding: 2px 10px; border-radius: 999px; font-weight: 600; }
+  #analysisPanel .align-bull { background: rgba(208,59,59,0.15); color: var(--up); }
+  #analysisPanel .align-bear { background: rgba(12,163,12,0.15); color: var(--down); }
+  #analysisPanel .align-mixed { background: var(--chip-bg); color: var(--text-secondary); }
+  #analysisPanel .ref-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 10px 0; }
+  #analysisPanel .ref-item { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  #analysisPanel .ref-item .label { font-size: 11px; color: var(--text-muted); }
+  #analysisPanel .ref-item .value { font-size: 15px; font-variant-numeric: tabular-nums; font-weight: 600; margin-top: 2px; }
+  #analysisPanel .note { color: var(--text-secondary); line-height: 1.7; }
+  #analysisPanel .disclaimer { color: var(--text-muted); font-size: 11px; margin-top: 8px; }
+
+  /* table */
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  thead th {
+    text-align: right; color: var(--text-muted); font-weight: 500;
+    border-bottom: 1px solid var(--gridline); padding: 6px 8px; cursor: pointer; white-space: nowrap;
+  }
+  thead th:first-child, thead th:nth-child(2) { text-align: left; }
+  thead th.sorted { color: var(--text-primary); }
+  tbody td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+  tbody td:first-child, tbody td:nth-child(2) { text-align: left; font-variant-numeric: normal; }
+  tbody tr:hover { background: var(--chip-bg); cursor: pointer; }
+  .chips button { border-radius: 999px; padding: 5px 12px; }
+  .chips button.active { background: var(--series-1); color: #fff; border-color: transparent; }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 20px 0; text-align: center; }
+  footer { color: var(--text-muted); font-size: 11px; text-align: center; margin-top: 24px; line-height: 1.6; }
+
+  /* sector flow */
+  .flow-bar-track { position: relative; width: 140px; height: 14px; background: var(--chip-bg); border-radius: 3px; }
+  .flow-bar-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--baseline); }
+  .flow-bar-fill { position: absolute; top: 1px; bottom: 1px; border-radius: 2px; }
+  .flow-bar-fill.pos { background: var(--up); left: 50%; }
+  .flow-bar-fill.neg { background: var(--down); right: 50%; }
+  #sectorFlowBody tr { cursor: pointer; }
+  #sectorFlowBody tr:hover { background: var(--chip-bg); }
+
+  /* screener */
+  .screener-controls { font-size: 12.5px; color: var(--text-secondary); }
+  .screener-controls input[type=number] {
+    font-family: inherit; font-size: 13px; padding: 5px 8px; width: 60px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--text-primary);
+  }
+  .screener-controls select {
+    font-family: inherit; font-size: 13px; padding: 5px 8px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--text-primary);
+  }
+  #screenerStatus { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; margin-left: 4px; white-space: nowrap; }
+  .badge.disposition { background: rgba(208,59,59,0.15); color: var(--up); }
+  .badge.attention { background: rgba(237,161,0,0.18); color: #b8860b; }
+  @media (prefers-color-scheme: dark) { .badge.attention { color: #eda100; } }
+  .badge.category-trend { background: rgba(42,120,214,0.15); color: var(--series-1); }
+  .badge.category-pullback { background: rgba(74,58,167,0.15); color: var(--ma20); }
+  #dailyWatchlistBody tr { cursor: pointer; }
+  #dailyWatchlistBody tr:hover { background: var(--chip-bg); }
+  .pos { color: var(--up); }
+  .neg { color: var(--down); }
+  .spinner {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--series-1);
+    animation: spin 0.7s linear infinite; margin-right: 6px; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 維護 / 連線異常畫面 */
+  #maintenanceOverlay {
+    display: none; position: fixed; inset: 0; z-index: 999;
+    background: var(--page); align-items: center; justify-content: center; padding: 24px;
+  }
+  #maintenanceOverlay .card {
+    max-width: 420px; text-align: center; margin: 0; padding: 36px 32px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  }
+  #maintenanceOverlay .big-spinner {
+    width: 40px; height: 40px; border-radius: 50%; margin: 0 auto 20px;
+    border: 3px solid var(--border); border-top-color: var(--series-1);
+    animation: spin 0.8s linear infinite;
+  }
+  #maintenanceOverlay .status-badge {
+    display: inline-block; font-size: 12px; font-weight: 600; padding: 4px 12px;
+    border-radius: 999px; background: rgba(237,161,0,0.18); color: #b8860b; margin-bottom: 16px;
+  }
+  @media (prefers-color-scheme: dark) { #maintenanceOverlay .status-badge { color: #eda100; } }
+  #maintenanceOverlay h2 { font-size: 18px; margin: 0 0 10px; }
+  #maintenanceOverlay p { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 8px; }
+  #maintenanceOverlay .retry-note { font-size: 11.5px; color: var(--text-muted); margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<div id="maintenanceOverlay">
+  <div class="card">
+    <div class="big-spinner"></div>
+    <div class="status-badge">資料來源暫時無法連線</div>
+    <h2>暫時取不到台股資料</h2>
+    <p>本機伺服器目前連不到證交所的資料來源，可能是網路中斷、證交所系統維護，或暫時被限流。</p>
+    <p>畫面會自動每 20 秒重新檢查，連線恢復後會自動消失並重新載入資料，不需要手動操作。</p>
+    <div class="retry-note" id="maintenanceRetryNote"></div>
+  </div>
+</div>
+
+<header class="top">
+  <h1>台股分析工具</h1>
+  <div class="row">
+    <span id="lastUpdated"></span>
+    <button id="refreshBtn">重新整理</button>
+  </div>
+  <div id="indicesBar"></div>
+</header>
+
+<section class="card" id="dailyWatchlistCard">
+  <div class="row between" style="margin-bottom:4px">
+    <h2 style="margin:0">📋 明日觀察清單</h2>
+    <button id="genDailyWatchlistBtn" class="primary">產生清單</button>
+  </div>
+  <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 10px; line-height:1.6">
+    彙整「選股：月線多頭＋財務體質」評分最高的股票，加上「處置股回檔觀察」名單，統一排序放在這裡，
+    不用再分別展開下面兩個區塊。<strong>不是投資建議、不是明天的預測</strong>，只是把你已經設定好的篩選條件跑一次、結果彙整在一起，方便你收盤後快速看一輪。
+  </p>
+  <div id="dailyWatchlistStatus" class="empty">按「產生清單」開始（會依下面「選股」區塊目前設定的條件跑一次，第一次跑可能需要 10-30 秒）</div>
+  <div style="overflow-x:auto">
+    <table id="dailyWatchlistTable" style="display:none">
+      <thead>
+        <tr>
+          <th style="text-align:left">類別</th>
+          <th style="text-align:left">代碼</th>
+          <th style="text-align:left">名稱</th>
+          <th style="text-align:left">產業別</th>
+          <th>評分／位階</th>
+          <th>收盤</th>
+          <th>進場參考價</th>
+          <th style="text-align:left">標記</th>
+        </tr>
+      </thead>
+      <tbody id="dailyWatchlistBody"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>觀察清單（點擊卡片看走勢圖）</h2>
+  <form id="watchlistForm" class="row">
+    <input type="text" id="codeInput" placeholder="輸入股票代碼，如 2330" maxlength="6">
+    <button type="submit" class="primary">加入</button>
+  </form>
+  <div id="tiles"></div>
+  <div id="tilesEmpty" class="empty" style="display:none">尚未加入任何股票，輸入代碼並按「加入」開始追蹤。</div>
+</section>
+
+<section class="card">
+  <div class="row between">
+    <div>
+      <div id="chartTitle">走勢圖</div>
+      <div id="chartMeta">從觀察清單或下方列表點選一檔股票</div>
+    </div>
+    <div class="row ranges">
+      <button id="intradayBtn" data-view="intraday">今日走勢（9:00-13:30）</button>
+      <button data-months="1">1個月</button>
+      <button data-months="3" class="active">3個月</button>
+      <button data-months="6">6個月</button>
+      <button data-months="12">1年</button>
+      <label style="display:flex; align-items:center; gap:5px; font-size:12.5px; color:var(--text-secondary); cursor:pointer; margin-left:4px">
+        <input type="checkbox" id="bollingerToggle">
+        布林通道（20,2）
+      </label>
+    </div>
+  </div>
+  <div id="chartWrap">
+    <svg id="chart" viewBox="0 0 900 260" preserveAspectRatio="none"></svg>
+    <div id="tooltip"></div>
+  </div>
+  <div id="chartLegend"></div>
+  <div id="analysisPanel"></div>
+</section>
+
+<section class="card">
+  <div class="row between" style="margin-bottom:4px">
+    <h2 style="margin:0">產業資金流向（今日）</h2>
+    <button id="toggleSectorBtn" class="primary">展開查看</button>
+  </div>
+  <div id="sectorFlowContent" style="display:none">
+    <div class="row between" style="margin-bottom:4px">
+      <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 10px; flex:1">
+        以「成交值加權漲跌幅」代表資金集中流入／流出的方向：數值越高代表資金越往該產業集中，越低代表資金流出該產業。點列可直接帶入下方選股的產業別篩選。
+      </p>
+      <button id="refreshSectorBtn">重新整理</button>
+    </div>
+    <div id="sectorFlowStatus" class="empty">載入中…</div>
+    <div style="overflow-x:auto">
+      <table id="sectorFlowTable" style="display:none">
+        <thead>
+          <tr>
+            <th style="text-align:left" data-key="industry">產業別</th>
+            <th style="text-align:left">資金流向</th>
+            <th data-key="value_weighted_change_pct" class="sorted">成交值加權漲跌%</th>
+            <th data-key="advance">上漲</th>
+            <th data-key="decline">下跌</th>
+            <th data-key="stock_count">家數</th>
+            <th data-key="total_value_billion">成交值（億）</th>
+          </tr>
+        </thead>
+        <tbody id="sectorFlowBody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row between" style="margin-bottom:12px">
+    <h2 style="margin:0">市場總覽（前一交易日收盤資料）</h2>
+    <button id="toggleMarketBtn" class="primary">展開查看</button>
+  </div>
+  <div id="marketOverviewContent" style="display:none">
+  <div class="row between" style="margin-bottom:12px">
+    <div></div>
+    <input type="text" id="searchInput" placeholder="搜尋代碼或名稱">
+  </div>
+  <div class="row chips" style="margin-bottom:12px">
+    <button data-filter="volume" class="active">成交量前20</button>
+    <button data-filter="gainers">漲幅前20</button>
+    <button data-filter="losers">跌幅前20</button>
+    <button data-filter="attention">注意股</button>
+    <button data-filter="disposition">處置股</button>
+  </div>
+  <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr>
+          <th data-key="Code">代碼</th>
+          <th data-key="Name">名稱</th>
+          <th data-key="ClosingPrice">收盤</th>
+          <th data-key="ChangePct">漲跌幅</th>
+          <th data-key="OpeningPrice">開盤</th>
+          <th data-key="HighestPrice">最高</th>
+          <th data-key="LowestPrice">最低</th>
+          <th data-key="TradeVolume">成交量</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row between" style="margin-bottom:4px">
+    <h2 style="margin:0">處置股回檔觀察</h2>
+    <button id="toggleDispWatchBtn" class="primary">展開查看</button>
+  </div>
+  <div id="dispWatchContent" style="display:none">
+    <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 10px; line-height:1.6">
+      列出目前有處置公告、且股價已回檔到布林通道中線（位階5）以下的股票，位階越低代表回檔越深。
+      這是給想觀察「處置股是否出現反彈訊號」的人參考的觀察名單，<strong>不是進場建議</strong>——處置股波動本來就大，
+      回檔到通道下緣也可能繼續破底，請自行評估風險。
+    </p>
+    <div id="dispWatchStatus" class="empty">載入中…</div>
+    <div style="overflow-x:auto">
+      <table id="dispWatchTable" style="display:none">
+        <thead>
+          <tr>
+            <th style="text-align:left">代碼</th>
+            <th style="text-align:left">名稱</th>
+            <th>收盤</th>
+            <th>布林上軌</th>
+            <th>布林中軌</th>
+            <th>布林下軌</th>
+            <th>布林位階</th>
+            <th style="text-align:left">處置原因</th>
+            <th style="text-align:left">處置期間</th>
+          </tr>
+        </thead>
+        <tbody id="dispWatchBody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row between" style="margin-bottom:8px">
+    <h2 style="margin:0">選股：月線多頭 + 財務體質</h2>
+    <button id="runScreenerBtn" class="primary">開始篩選</button>
+  </div>
+  <div class="row screener-controls" style="margin-bottom:4px">
+    月線乖離
+    <input type="number" id="screenerPct" value="5" min="0.5" max="20" step="0.5">
+    % 以內
+    ・月線走勢確認
+    <input type="number" id="screenerTrendDays" value="10" min="3" max="60" step="1">
+    個交易日前
+    ・產業別
+    <select id="industryFilter"><option value="">全部</option></select>
+    ・近20日均成交值至少
+    <input type="number" id="screenerMinTradeValue" value="3000" min="0" step="500">
+    萬元
+  </div>
+  <div class="row screener-controls" style="margin-bottom:8px">
+    <label style="display:flex; align-items:center; gap:5px; cursor:pointer">
+      <input type="checkbox" id="screenerLongTerm">
+      同時分析近2年長期多頭比例（較慢，會多花數十秒）
+    </label>
+  </div>
+  <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
+    「月線走勢確認」是抓幾個交易日前的月線來比對現在，判斷月線是否在向上。天數越短（如 5）越早發現轉折，但容易被雜訊誤判；
+    天數越長（如 20 以上）訊號越穩，但會晚一點才抓到剛起漲的股票。<strong>一般抓 10～15 個交易日是比較平衡的預設值</strong>，
+    想抓早期轉折可以調到 5～8，想找已經穩定走多頭一段時間的可以調到 20。
+  </p>
+  <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
+    <strong>綜合評分</strong>：月營收月增／年增／累計年增是否為正、EPS 是否為正、月線斜率是否夠強、近20日籌碼是否偏多、
+    大戶人數是否增加，各符合一項 +1 分（滿分7），有處置或注意公告倒扣3分，「出貨風險」倒扣2分，「籌碼營收背離」倒扣2分，結果依評分高到低排序。
+    <strong>進場參考價</strong>是月線本身（拉回月線的常見技術面觀察位）。<strong>籌碼傾向</strong>是用近5／20日「上漲日成交量－下跌日成交量」
+    推算的近似代理指標，不是真正的券商分點主力進出（那需要付費資料）。<strong>大戶人數</strong>來自集保股權分散表（>1,000張），每週五更新，
+    需要累積兩週資料才看得到增減；<strong>大戶人數低於5人時不列入評分</strong>（樣本太小，變化%沒有統計意義，表格會標「樣本少」）。
+    <strong>籌碼營收背離</strong>：近20日籌碼明顯偏多但營收年增卻明顯衰退，代表買盤可能是題材面而非基本面撐起來的，視為警訊不加分。
+    以上全部是用已知公開資料計算的客觀統計，<strong>不是預測明天走勢，也不是投資建議</strong>，請自行判斷風險。
+  </p>
+  <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
+    <strong>流動性過濾</strong>：近20個交易日平均成交金額低於門檻的股票會直接排除，不會出現在結果裡——即使技術面/財務面條件都符合，
+    太冷門的股票實際買賣時價格容易被自己的單子影響，不容易照理想價位進出。預設 3000 萬元是比較保守的門檻，想要放寬找更多小型股可以調低，
+    想要更嚴格只看熱門股可以調高（例如 1 億）。
+  </p>
+  <div id="screenerStatus"></div>
+  <div style="overflow-x:auto; margin-top:10px">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">代碼</th>
+          <th style="text-align:left">名稱</th>
+          <th style="text-align:left">產業別</th>
+          <th>綜合評分</th>
+          <th>收盤</th>
+          <th>月線</th>
+          <th>進場參考價</th>
+          <th>乖離%</th>
+          <th>月線斜率%</th>
+          <th>近20日籌碼傾向%</th>
+          <th>大戶人數</th>
+          <th>大戶人數變化</th>
+          <th>近20日均成交值(萬)</th>
+          <th>近2年站上月線%</th>
+          <th>月營收MoM%</th>
+          <th>月營收YoY%</th>
+          <th>累計營收YoY%</th>
+          <th>EPS（期別）</th>
+          <th style="text-align:left">標記</th>
+        </tr>
+      </thead>
+      <tbody id="screenerBody">
+        <tr><td colspan="18" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 10-30 秒）</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  資料來源：台灣證券交易所（TWSE OpenAPI / MIS 即時揭示）、集中保管結算所（集保股權分散表）。即時報價依證交所延遲規則提供，僅供參考，非投資建議。<br>
+  選股結果為程式依公開資料計算之估算指標（月線＝20日均線，乖離／趨勢／營收／EPS／籌碼／大戶人數皆取自公開資訊），非投資建議，請自行判斷風險；處置股／注意股標記僅反映查詢當下證交所公告。
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
