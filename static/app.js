@@ -819,7 +819,7 @@
 
   async function renderIntradayChart() {
     const code = state.selectedCode;
-    chartTitle.textContent = `${state.selectedName || code} (${code}) 今日分時走勢`;
+    chartTitle.textContent = `${state.selectedName || code} (${code}) 分時走勢`;
     $("#analysisPanel").style.display = "none";
     $("#chartLegend").innerHTML = "";
     svg.innerHTML = "";
@@ -838,8 +838,16 @@
 
     const points = data.points || [];
     if (points.length < 2) {
-      chartMeta.textContent = "查無今日分時資料（可能尚未開盤、已收盤超過快取時間，或代碼查無資料）";
+      chartMeta.textContent = "查無最近交易日的分時資料（可能代碼查無資料，或已收盤超過快取時間）";
       return;
+    }
+
+    if (data.trade_date) {
+      const todayStr = new Date().toLocaleDateString("sv-SE"); // yyyy-mm-dd
+      const label = data.trade_date === todayStr
+        ? "今日"
+        : `最近交易日 ${data.trade_date.slice(5).replace("-", "/")} `;
+      chartTitle.textContent = `${state.selectedName || code} (${code}) ${label}分時走勢`;
     }
 
     const { x0, x1, y0, y1 } = plotArea();

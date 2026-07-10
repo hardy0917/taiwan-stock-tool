@@ -318,8 +318,12 @@ def fetch_stock_daily_rows(code, months=3):
 
 
 def fetch_intraday(code):
+    """抓最近一個「有資料」的交易日分時走勢。用 range=5d 一次多抓幾天份的
+    1 分鐘資料，再取其中最後一個出現的日期──這樣遇到假日、還沒開盤、
+    或連假之後，會自動退回最近一個真正有交易的日子，而不是抓「今天」
+    抓到空的。"""
     for suffix in (".TW", ".TWO"):
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{code}{suffix}?interval=1m&range=1d"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{code}{suffix}?interval=1m&range=5d"
         try:
             data = fetch_json(url, ttl=30)
         except Exception:
@@ -331,15 +335,27 @@ def fetch_intraday(code):
         timestamps = r0.get("timestamp") or []
         quote0 = ((r0.get("indicators") or {}).get("quote") or [{}])[0]
         closes = quote0.get("close") or []
+
+        trade_date = None
+        for ts, c in zip(reversed(timestamps), reversed(closes)):
+            if c is not None:
+                trade_date = time.strftime("%Y-%m-%d", time.localtime(ts))
+                break
+        if trade_date is None:
+            continue
+
         points = []
         for ts, c in zip(timestamps, closes):
             if c is None:
+                continue
+            if time.strftime("%Y-%m-%d", time.localtime(ts)) != trade_date:
                 continue
             t = time.strftime("%H:%M:%S", time.localtime(ts))
             points.append({"time": t, "price": round(c, 2)})
         meta = r0.get("meta") or {}
         return {
             "points": points,
+            "trade_date": trade_date,
             "prev_close": meta.get("previousClose") or meta.get("chartPreviousClose"),
             "day_high": meta.get("regularMarketDayHigh"),
             "day_low": meta.get("regularMarketDayLow"),
