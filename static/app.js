@@ -1570,12 +1570,14 @@
     modalBody.appendChild(contentEl);
     contentEl.style.display = "block";
     modalOverlay.classList.add("open");
+    document.body.style.overflow = "hidden"; // 彈窗開著時鎖住背景捲動，避免背景跟著滑動
     if (onFirstOpen) onFirstOpen();
   }
 
   function closeModal() {
     if (!modalOverlay.classList.contains("open")) return;
     modalOverlay.classList.remove("open");
+    document.body.style.overflow = "";
     const contentEl = modalBody.firstElementChild;
     if (contentEl && modalHomes.has(contentEl)) {
       const home = modalHomes.get(contentEl);
