@@ -48,6 +48,7 @@
     color: var(--text-primary);
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
+  html { scroll-padding-top: 64px; }
   body { padding: 24px; max-width: 1180px; margin: 0 auto; }
   h1 { font-size: 20px; margin: 0; }
   h2 { font-size: 15px; margin: 0 0 12px; color: var(--text-secondary); font-weight: 600; }
@@ -61,6 +62,14 @@
   #indicesBar .idx-name { color: var(--text-muted); }
   #indicesBar .idx-price { font-weight: 600; font-variant-numeric: tabular-nums; }
   #indicesBar .idx-chg { font-variant-numeric: tabular-nums; }
+  .quick-nav {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    background: var(--page); padding: 10px 0; margin: 0 0 16px;
+    border-bottom: 1px solid var(--gridline);
+  }
+  .quick-nav button { font-size: 12.5px; padding: 5px 10px; }
+  .quick-nav .quick-nav-sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 4px; }
   button {
     font-family: inherit; font-size: 13px; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface-1);
@@ -280,6 +289,17 @@
   <div id="indicesBar"></div>
 </header>
 
+<nav class="quick-nav" id="quickNav">
+  <button type="button" data-jump="dailyWatchlistCard">📋 明日觀察清單</button>
+  <button type="button" data-jump="watchlistCard">觀察清單</button>
+  <button type="button" data-jump="chartCard">走勢圖</button>
+  <button type="button" data-jump="screenerCard">選股篩選</button>
+  <span class="quick-nav-sep"></span>
+  <button type="button" id="navSectorBtn">產業資金流向</button>
+  <button type="button" id="navMarketBtn">市場總覽</button>
+  <button type="button" id="navDispWatchBtn">處置股回檔觀察</button>
+</nav>
+
 <section class="card" id="dailyWatchlistCard">
   <div class="row between" style="margin-bottom:4px">
     <h2 style="margin:0">📋 明日觀察清單</h2>
@@ -309,7 +329,7 @@
   </div>
 </section>
 
-<section class="card">
+<section class="card" id="watchlistCard">
   <h2>觀察清單（點擊卡片看走勢圖）</h2>
   <form id="watchlistForm" class="row">
     <input type="text" id="codeInput" placeholder="輸入股票代碼，如 2330" maxlength="6">
@@ -319,7 +339,7 @@
   <div id="tilesEmpty" class="empty" style="display:none">尚未加入任何股票，輸入代碼並按「加入」開始追蹤。</div>
 </section>
 
-<section class="card">
+<section class="card" id="chartCard">
   <div class="row between">
     <div>
       <div id="chartTitle">走勢圖</div>
@@ -451,7 +471,7 @@
   </div>
 </section>
 
-<section class="card">
+<section class="card" id="screenerCard">
   <div class="row between" style="margin-bottom:8px">
     <h2 style="margin:0">選股：月線多頭 + 財務體質</h2>
     <button id="runScreenerBtn" class="primary">開始篩選</button>

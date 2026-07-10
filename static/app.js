@@ -1589,19 +1589,30 @@
   modalOverlay.addEventListener("click", (e) => { if (e.target === modalOverlay) closeModal(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
 
+  // ---------- 頂部導覽列：點了直接跳到分區，不用自己滑滾輪找 ----------
+  document.querySelectorAll("#quickNav button[data-jump]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      $(`#${btn.dataset.jump}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
   // ---------- 產業資金流向／市場總覽：按按鈕才彈窗＋才載入資料 ----------
   let sectorLoaded = false, marketLoaded = false;
 
-  $("#toggleSectorBtn").addEventListener("click", () => {
+  function openSectorModal() {
     openModal("產業資金流向（今日）", $("#sectorFlowContent"), () => {
       if (!sectorLoaded) { sectorLoaded = true; loadSectorFlow(); }
     });
-  });
-  $("#toggleMarketBtn").addEventListener("click", () => {
+  }
+  function openMarketModal() {
     openModal("市場總覽（前一交易日收盤資料）", $("#marketOverviewContent"), () => {
       if (!marketLoaded) { marketLoaded = true; loadDayAll(); }
     });
-  });
+  }
+  $("#toggleSectorBtn").addEventListener("click", openSectorModal);
+  $("#toggleMarketBtn").addEventListener("click", openMarketModal);
+  $("#navSectorBtn").addEventListener("click", openSectorModal);
+  $("#navMarketBtn").addEventListener("click", openMarketModal);
 
   // ---------- 處置股回檔觀察 ----------
   let dispWatchResults = [];
@@ -1660,11 +1671,13 @@
   }
 
   let dispWatchLoaded = false;
-  $("#toggleDispWatchBtn").addEventListener("click", () => {
+  function openDispWatchModal() {
     openModal("處置股回檔觀察", $("#dispWatchContent"), () => {
       if (!dispWatchLoaded) { dispWatchLoaded = true; loadDispWatch(); }
     });
-  });
+  }
+  $("#toggleDispWatchBtn").addEventListener("click", openDispWatchModal);
+  $("#navDispWatchBtn").addEventListener("click", openDispWatchModal);
 
   // ---------- 明日觀察清單（彙整選股高分 + 處置股回檔） ----------
   const dailyWatchlistStatus = $("#dailyWatchlistStatus");
