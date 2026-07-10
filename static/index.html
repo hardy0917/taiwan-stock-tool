@@ -233,6 +233,29 @@
   #maintenanceOverlay h2 { font-size: 18px; margin: 0 0 10px; }
   #maintenanceOverlay p { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 8px; }
   #maintenanceOverlay .retry-note { font-size: 11.5px; color: var(--text-muted); margin-top: 16px; }
+
+  /* 展開查看：置中彈出視窗，取代原本要往下滑才看得到的內嵌展開 */
+  #modalOverlay {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.55); align-items: center; justify-content: center; padding: 20px;
+  }
+  #modalOverlay.open { display: flex; }
+  #modalOverlay .modal-box {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    width: 100%; max-width: min(1000px, 94vw); max-height: 88vh;
+    display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  #modalOverlay .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--gridline); flex: none;
+  }
+  #modalOverlay .modal-header h3 { margin: 0; font-size: 15px; }
+  #modalOverlay .modal-close {
+    background: none; border: none; font-size: 20px; line-height: 1; cursor: pointer;
+    color: var(--text-secondary); padding: 4px 8px; border-radius: 6px;
+  }
+  #modalOverlay .modal-close:hover { color: var(--text-primary); background: var(--chip-bg); }
+  #modalOverlay .modal-body { padding: 16px 18px; overflow: auto; }
 </style>
 </head>
 <body>
@@ -500,9 +523,16 @@
         </tr>
       </thead>
       <tbody id="screenerBody">
-        <tr><td colspan="18" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 10-30 秒）</td></tr>
+        <tr><td colspan="21" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 30-60 秒）</td></tr>
       </tbody>
     </table>
+  </div>
+  <div id="screenerPagination" class="row between" style="margin-top:10px; display:none">
+    <span id="screenerPageInfo" style="font-size:12.5px; color:var(--text-secondary)"></span>
+    <div class="row" style="gap:8px">
+      <button id="screenerPrevBtn" type="button">‹ 上一頁</button>
+      <button id="screenerNextBtn" type="button">下一頁 ›</button>
+    </div>
   </div>
 </section>
 
@@ -510,6 +540,16 @@
   資料來源：台灣證券交易所（TWSE OpenAPI / MIS 即時揭示）、集中保管結算所（集保股權分散表）。即時報價依證交所延遲規則提供，僅供參考，非投資建議。<br>
   選股結果為程式依公開資料計算之估算指標（月線＝20日均線，乖離／趨勢／營收／EPS／籌碼／大戶人數皆取自公開資訊），非投資建議，請自行判斷風險；處置股／注意股標記僅反映查詢當下證交所公告。
 </footer>
+
+<div id="modalOverlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modalTitle"></h3>
+      <button id="modalCloseBtn" class="modal-close" aria-label="關閉" type="button">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
 
 <script src="/app.js"></script>
 </body>

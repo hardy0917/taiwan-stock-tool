@@ -978,6 +978,7 @@
   }
 
   function selectStock(code, name) {
+    closeModal();
     state.selectedCode = code;
     state.selectedName = name;
     state.selectedIsIndex = false;
@@ -1223,6 +1224,8 @@
   const screenerStatus = $("#screenerStatus");
   const industryFilter = $("#industryFilter");
   let screenerResults = [];
+  const SCREENER_PAGE_SIZE = 10;
+  let screenerPage = 1;
 
   function populateIndustryFilter(results) {
     const industries = [...new Set(results.map((r) => r.industry))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
@@ -1241,12 +1244,19 @@
     const industry = industryFilter.value;
     const rows = industry ? screenerResults.filter((r) => r.industry === industry) : screenerResults;
 
+    const pagination = $("#screenerPagination");
     screenerBody.innerHTML = "";
     if (!rows.length) {
       screenerBody.innerHTML = `<tr><td colspan="21" class="empty">沒有符合條件的股票</td></tr>`;
+      pagination.style.display = "none";
       return;
     }
-    for (const r of rows) {
+
+    const totalPages = Math.max(1, Math.ceil(rows.length / SCREENER_PAGE_SIZE));
+    screenerPage = Math.min(Math.max(1, screenerPage), totalPages);
+    const pageRows = rows.slice((screenerPage - 1) * SCREENER_PAGE_SIZE, screenerPage * SCREENER_PAGE_SIZE);
+
+    for (const r of pageRows) {
       const tr = document.createElement("tr");
 
       const textCell = (text, alignLeft) => {
@@ -1356,7 +1366,20 @@
       tr.addEventListener("click", () => selectStock(r.code, r.name));
       screenerBody.appendChild(tr);
     }
+
+    pagination.style.display = totalPages > 1 ? "flex" : "none";
+    $("#screenerPageInfo").textContent = `共 ${rows.length} 筆・第 ${screenerPage} / ${totalPages} 頁`;
+    $("#screenerPrevBtn").disabled = screenerPage <= 1;
+    $("#screenerNextBtn").disabled = screenerPage >= totalPages;
   }
+
+  $("#screenerPrevBtn").addEventListener("click", () => {
+    if (screenerPage > 1) { screenerPage -= 1; renderScreenerTable(); }
+  });
+  $("#screenerNextBtn").addEventListener("click", () => {
+    screenerPage += 1;
+    renderScreenerTable();
+  });
 
   async function runScreener() {
     const pct = parseFloat($("#screenerPct").value) || 5;
@@ -1372,6 +1395,7 @@
       const res = await fetch(`/api/screener?pct=${pct}&trend_days=${trendDays}&long_term=${longTerm ? 1 : 0}&min_trade_value_wan=${minTradeValueWan}`);
       const data = await res.json();
       screenerResults = data.results || [];
+      screenerPage = 1;
       populateIndustryFilter(screenerResults);
       renderScreenerTable();
       renderDailyWatchlist();
@@ -1387,7 +1411,7 @@
   }
 
   $("#runScreenerBtn").addEventListener("click", runScreener);
-  industryFilter.addEventListener("change", renderScreenerTable);
+  industryFilter.addEventListener("change", () => { screenerPage = 1; renderScreenerTable(); });
 
   // ---------- 產業資金流向 ----------
   const sectorFlowBody = $("#sectorFlowBody");
@@ -1430,10 +1454,11 @@
       tr.appendChild((() => { const td = document.createElement("td"); td.textContent = fmtNum(r.total_value_billion); return td; })());
 
       tr.addEventListener("click", () => {
+        closeModal();
         document.querySelectorAll("#industryFilter option").forEach((opt) => {
           if (opt.value === r.industry) industryFilter.value = r.industry;
         });
-        if (industryFilter.value === r.industry) renderScreenerTable();
+        if (industryFilter.value === r.industry) { screenerPage = 1; renderScreenerTable(); }
         $("#runScreenerBtn").closest("section").scrollIntoView({ behavior: "smooth", block: "start" });
       });
       sectorFlowBody.appendChild(tr);
@@ -1530,26 +1555,52 @@
     }
   }
 
-  // ---------- 產業資金流向／市場總覽：預設收合，按按鈕才展開＋才載入資料 ----------
-  let sectorLoaded = false, marketLoaded = false;
+  // ---------- 展開查看：置中彈出視窗，取代原本要往下滑才看得到的內嵌展開 ----------
+  const modalOverlay = $("#modalOverlay");
+  const modalTitle = $("#modalTitle");
+  const modalBody = $("#modalBody");
+  const modalHomes = new Map(); // contentEl -> 原本所在位置，關閉時要放回去
 
-  function makeToggle(btnId, contentId, onFirstExpand) {
-    const btn = $(`#${btnId}`);
-    const content = $(`#${contentId}`);
-    let expanded = false;
-    btn.addEventListener("click", () => {
-      expanded = !expanded;
-      content.style.display = expanded ? "block" : "none";
-      btn.textContent = expanded ? "收合" : "展開查看";
-      if (expanded) onFirstExpand();
-    });
+  function openModal(title, contentEl, onFirstOpen) {
+    if (!modalHomes.has(contentEl)) {
+      modalHomes.set(contentEl, { parent: contentEl.parentNode, next: contentEl.nextSibling });
+    }
+    modalTitle.textContent = title;
+    modalBody.innerHTML = "";
+    modalBody.appendChild(contentEl);
+    contentEl.style.display = "block";
+    modalOverlay.classList.add("open");
+    if (onFirstOpen) onFirstOpen();
   }
 
-  makeToggle("toggleSectorBtn", "sectorFlowContent", () => {
-    if (!sectorLoaded) { sectorLoaded = true; loadSectorFlow(); }
+  function closeModal() {
+    if (!modalOverlay.classList.contains("open")) return;
+    modalOverlay.classList.remove("open");
+    const contentEl = modalBody.firstElementChild;
+    if (contentEl && modalHomes.has(contentEl)) {
+      const home = modalHomes.get(contentEl);
+      if (home.next) home.parent.insertBefore(contentEl, home.next);
+      else home.parent.appendChild(contentEl);
+    }
+    modalBody.innerHTML = "";
+  }
+
+  $("#modalCloseBtn").addEventListener("click", closeModal);
+  modalOverlay.addEventListener("click", (e) => { if (e.target === modalOverlay) closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+  // ---------- 產業資金流向／市場總覽：按按鈕才彈窗＋才載入資料 ----------
+  let sectorLoaded = false, marketLoaded = false;
+
+  $("#toggleSectorBtn").addEventListener("click", () => {
+    openModal("產業資金流向（今日）", $("#sectorFlowContent"), () => {
+      if (!sectorLoaded) { sectorLoaded = true; loadSectorFlow(); }
+    });
   });
-  makeToggle("toggleMarketBtn", "marketOverviewContent", () => {
-    if (!marketLoaded) { marketLoaded = true; loadDayAll(); }
+  $("#toggleMarketBtn").addEventListener("click", () => {
+    openModal("市場總覽（前一交易日收盤資料）", $("#marketOverviewContent"), () => {
+      if (!marketLoaded) { marketLoaded = true; loadDayAll(); }
+    });
   });
 
   // ---------- 處置股回檔觀察 ----------
@@ -1609,8 +1660,10 @@
   }
 
   let dispWatchLoaded = false;
-  makeToggle("toggleDispWatchBtn", "dispWatchContent", () => {
-    if (!dispWatchLoaded) { dispWatchLoaded = true; loadDispWatch(); }
+  $("#toggleDispWatchBtn").addEventListener("click", () => {
+    openModal("處置股回檔觀察", $("#dispWatchContent"), () => {
+      if (!dispWatchLoaded) { dispWatchLoaded = true; loadDispWatch(); }
+    });
   });
 
   // ---------- 明日觀察清單（彙整選股高分 + 處置股回檔） ----------
