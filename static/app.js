@@ -188,12 +188,10 @@
   function ensureStockDirectory() {
     if (stockDirectory.length) return Promise.resolve(stockDirectory);
     if (!stockDirectoryPromise) {
-      stockDirectoryPromise = fetch("/api/day_all")
+      stockDirectoryPromise = fetch("/api/stock_directory")
         .then((res) => res.json())
         .then((data) => {
-          stockDirectory = (data.data || [])
-            .filter((r) => r.Code && r.Name)
-            .map((r) => ({ code: r.Code, name: r.Name }));
+          stockDirectory = data.data || [];
           return stockDirectory;
         })
         .catch((err) => { console.error(err); return []; });

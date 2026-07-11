@@ -639,6 +639,36 @@ def fetch_sector_flow():
     return results
 
 
+def fetch_stock_directory():
+    """代碼＋名稱清單，合併上市（TWSE）與上櫃（TPEx）個股，給前端「加入觀察清單」
+    的自動完成搜尋用。上市直接用 STOCK_DAY_ALL（含一般股票與ETF）；上櫃來源涵蓋
+    公司債ETF／權證等上萬檔非個股商品，只保留4碼純數字的一般股票代碼，過濾雜訊。"""
+    out = []
+    seen = set()
+    try:
+        twse = fetch_json("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", ttl=3600)
+        for row in twse:
+            code, name = row.get("Code", ""), row.get("Name", "")
+            if code and name and code not in seen:
+                seen.add(code)
+                out.append({"code": code, "name": name})
+    except Exception:
+        pass
+    try:
+        tpex = fetch_json("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", ttl=3600)
+        for row in tpex:
+            code = row.get("SecuritiesCompanyCode", "")
+            name = row.get("CompanyName", "")
+            if not (len(code) == 4 and code.isdigit()):
+                continue
+            if code and name and code not in seen:
+                seen.add(code)
+                out.append({"code": code, "name": name})
+    except Exception:
+        pass
+    return out
+
+
 # ---------- 選股篩選：月線多頭 + 財務體質 ----------
 
 _screener_cache = {}
@@ -1064,6 +1094,10 @@ class Handler(BaseHTTPRequestHandler):
                 url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
                 data = fetch_json(url, ttl=300)
                 self._send_json({"data": data})
+                return
+
+            if parsed.path == "/api/stock_directory":
+                self._send_json({"data": fetch_stock_directory()})
                 return
 
             if parsed.path == "/api/history":
