@@ -11,6 +11,7 @@ import threading
 import webbrowser
 import urllib.request
 import urllib.parse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -342,6 +343,149 @@ def fetch_intraday(code):
             "day_low": meta.get("regularMarketDayLow"),
         }
     return None
+
+
+INTRADAY_PATTERN_BUCKET_MIN = 15
+INTRADAY_SESSION_MIN = 270  # 09:00-13:30
+_INTRADAY_PERIOD_BOUNDS = [(0, 45), (45, 90), (90, 135), (135, 180), (180, 225), (225, 270)]
+_INTRADAY_PERIOD_LABELS = ["09:00-09:45", "09:45-10:30", "10:30-11:15", "11:15-12:00", "12:00-12:45", "12:45-13:30"]
+
+
+def fetch_intraday_pattern(code):
+    """統計近一個月（約20個交易日）的日內模式：平均走勢曲線（含每日高低變異帶）、
+    當日高/低點通常出現在哪個時段、各時段的典型震幅、開盤跳空與回補比例。
+    這些全部是「過去已經發生過的事」的客觀統計整理，不是對明天的預測，
+    樣本數通常只有20天上下，不構成任何勝率保證。"""
+    rows_by_day = {}
+    for suffix in (".TW", ".TWO"):
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{code}{suffix}?interval=5m&range=1mo"
+        try:
+            data = fetch_json(url, ttl=1800)
+        except Exception:
+            continue
+        result = (data.get("chart") or {}).get("result")
+        if not result:
+            continue
+        r0 = result[0]
+        timestamps = r0.get("timestamp") or []
+        if not timestamps:
+            continue
+        quote0 = ((r0.get("indicators") or {}).get("quote") or [{}])[0]
+        closes = quote0.get("close") or []
+        for ts, c in zip(timestamps, closes):
+            if c is None:
+                continue
+            dt = time.localtime(ts)
+            minute_of_session = (dt.tm_hour * 60 + dt.tm_min) - 9 * 60
+            if minute_of_session < 0 or minute_of_session >= INTRADAY_SESSION_MIN:
+                continue
+            day_key = time.strftime("%Y-%m-%d", dt)
+            rows_by_day.setdefault(day_key, []).append((minute_of_session, c))
+        break
+    if not rows_by_day:
+        return None
+
+    n_buckets = INTRADAY_SESSION_MIN // INTRADAY_PATTERN_BUCKET_MIN
+
+    def bucket_label(i):
+        h, m = divmod(9 * 60 + i * INTRADAY_PATTERN_BUCKET_MIN, 60)
+        return f"{h:02d}:{m:02d}"
+
+    per_day_bucket_pct = []
+    per_day_bucket_range_pct = []
+    high_periods, low_periods = [], []
+    day_first_price, day_last_close = {}, {}
+
+    for day in sorted(rows_by_day.keys()):
+        points = sorted(rows_by_day[day])
+        if len(points) < 5:
+            continue
+        open_price = points[0][1]
+        day_first_price[day] = open_price
+        day_last_close[day] = points[-1][1]
+
+        buckets = {}
+        for minute, price in points:
+            b = min(minute // INTRADAY_PATTERN_BUCKET_MIN, n_buckets - 1)
+            buckets.setdefault(b, []).append(price)
+        day_bucket_pct, day_bucket_range_pct = {}, {}
+        for b, prices in buckets.items():
+            avg_price = sum(prices) / len(prices)
+            day_bucket_pct[b] = (avg_price - open_price) / open_price * 100
+            day_bucket_range_pct[b] = (max(prices) - min(prices)) / open_price * 100
+        per_day_bucket_pct.append(day_bucket_pct)
+        per_day_bucket_range_pct.append(day_bucket_range_pct)
+
+        high_minute = max(points, key=lambda p: p[1])[0]
+        low_minute = min(points, key=lambda p: p[1])[0]
+        for idx, (lo, hi) in enumerate(_INTRADAY_PERIOD_BOUNDS):
+            if lo <= high_minute < hi:
+                high_periods.append(_INTRADAY_PERIOD_LABELS[idx])
+                break
+        for idx, (lo, hi) in enumerate(_INTRADAY_PERIOD_BOUNDS):
+            if lo <= low_minute < hi:
+                low_periods.append(_INTRADAY_PERIOD_LABELS[idx])
+                break
+
+    avg_path = []
+    for b in range(n_buckets):
+        vals = [d[b] for d in per_day_bucket_pct if b in d]
+        if not vals:
+            continue
+        avg_path.append({
+            "time": bucket_label(b),
+            "avg_pct": round(sum(vals) / len(vals), 3),
+            "min_pct": round(min(vals), 3),
+            "max_pct": round(max(vals), 3),
+        })
+
+    volatility_by_bucket = []
+    for b in range(n_buckets):
+        vals = [d[b] for d in per_day_bucket_range_pct if b in d]
+        if not vals:
+            continue
+        volatility_by_bucket.append({"time": bucket_label(b), "avg_range_pct": round(sum(vals) / len(vals), 3)})
+
+    high_hist = Counter(high_periods)
+    low_hist = Counter(low_periods)
+
+    gap_up = gap_down = gap_up_filled = gap_down_filled = 0
+    gap_pcts = []
+    valid_days = [d for d in sorted(rows_by_day.keys()) if d in day_first_price]
+    for i in range(1, len(valid_days)):
+        prev_day, cur_day = valid_days[i - 1], valid_days[i]
+        prev_close = day_last_close.get(prev_day)
+        cur_open = day_first_price.get(cur_day)
+        if prev_close is None or cur_open is None:
+            continue
+        gap_pct = (cur_open - prev_close) / prev_close * 100
+        gap_pcts.append(gap_pct)
+        cur_prices = [p for _, p in rows_by_day[cur_day]]
+        if gap_pct > 0.1:
+            gap_up += 1
+            if min(cur_prices) <= prev_close:
+                gap_up_filled += 1
+        elif gap_pct < -0.1:
+            gap_down += 1
+            if max(cur_prices) >= prev_close:
+                gap_down_filled += 1
+
+    gap_stats = {
+        "gap_up_days": gap_up,
+        "gap_down_days": gap_down,
+        "gap_up_filled_pct": round(gap_up_filled / gap_up * 100, 1) if gap_up else None,
+        "gap_down_filled_pct": round(gap_down_filled / gap_down * 100, 1) if gap_down else None,
+        "avg_abs_gap_pct": round(sum(abs(g) for g in gap_pcts) / len(gap_pcts), 2) if gap_pcts else None,
+    }
+
+    return {
+        "days_analyzed": len(per_day_bucket_pct),
+        "avg_path": avg_path,
+        "volatility_by_bucket": volatility_by_bucket,
+        "high_time_histogram": [{"period": p, "count": high_hist.get(p, 0)} for p in _INTRADAY_PERIOD_LABELS],
+        "low_time_histogram": [{"period": p, "count": low_hist.get(p, 0)} for p in _INTRADAY_PERIOD_LABELS],
+        "gap_stats": gap_stats,
+    }
 
 
 # ---------- 大戶持股（集保股權分散表，每週更新）----------
@@ -940,6 +1084,18 @@ class Handler(BaseHTTPRequestHandler):
                 data = fetch_intraday(code)
                 if data is None:
                     self._send_json({"code": code, "points": [], "error": "not found"})
+                    return
+                self._send_json({"code": code, **data})
+                return
+
+            if parsed.path == "/api/intraday_pattern":
+                code = qs.get("code", [""])[0].strip()
+                if not code:
+                    self._send_json({"error": "missing code"}, 400)
+                    return
+                data = fetch_intraday_pattern(code)
+                if data is None:
+                    self._send_json({"code": code, "error": "not found"}, 404)
                     return
                 self._send_json({"code": code, **data})
                 return

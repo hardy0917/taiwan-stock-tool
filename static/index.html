@@ -91,6 +91,20 @@
 
   /* watchlist */
   #watchlistForm { margin-bottom: 14px; }
+  .autocomplete-list {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+    min-width: 220px; max-height: 260px; overflow-y: auto;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  }
+  .autocomplete-list.open { display: block; }
+  .autocomplete-list .item {
+    padding: 7px 12px; font-size: 13px; cursor: pointer; display: flex; gap: 8px; align-items: baseline;
+  }
+  .autocomplete-list .item:hover, .autocomplete-list .item.active { background: var(--chip-bg); }
+  .autocomplete-list .item .code { font-variant-numeric: tabular-nums; color: var(--text-muted); flex: none; }
+  .autocomplete-list .item .name { color: var(--text-primary); }
+  .autocomplete-list .empty-item { padding: 8px 12px; font-size: 12.5px; color: var(--text-muted); }
   #tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
   .tile {
     border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
@@ -165,6 +179,21 @@
   #analysisPanel .ref-item .label { font-size: 11px; color: var(--text-muted); }
   #analysisPanel .ref-item .value { font-size: 15px; font-variant-numeric: tabular-nums; font-weight: 600; margin-top: 2px; }
   #analysisPanel .note { color: var(--text-secondary); line-height: 1.7; }
+
+  /* 個股日內模式分析 */
+  .pattern-modal .ref-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 10px 0; }
+  .pattern-modal .ref-item { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .pattern-modal .ref-item .label { font-size: 11px; color: var(--text-muted); }
+  .pattern-modal .ref-item .value { font-size: 15px; font-variant-numeric: tabular-nums; font-weight: 600; margin-top: 2px; }
+  .pattern-modal .note { color: var(--text-secondary); line-height: 1.7; font-size: 12.5px; }
+  .pattern-modal h4 { font-size: 13px; margin: 18px 0 8px; color: var(--text-secondary); }
+  .pattern-modal .hist-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 5px; }
+  .pattern-modal .hist-label { width: 92px; flex: none; color: var(--text-secondary); }
+  .pattern-modal .hist-track { flex: 1; height: 14px; background: var(--chip-bg); border-radius: 4px; overflow: hidden; }
+  .pattern-modal .hist-fill { height: 100%; background: var(--series-1); }
+  .pattern-modal .hist-fill.low { background: var(--down); }
+  .pattern-modal .hist-count { width: 26px; flex: none; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+  .pattern-modal .pattern-svg-wrap { position: relative; margin: 8px 0; }
   #analysisPanel .disclaimer { color: var(--text-muted); font-size: 11px; margin-top: 8px; }
 
   /* table */
@@ -332,7 +361,10 @@
 <section class="card" id="watchlistCard">
   <h2>觀察清單（點擊卡片看走勢圖）</h2>
   <form id="watchlistForm" class="row">
-    <input type="text" id="codeInput" placeholder="輸入股票代碼，如 2330" maxlength="6">
+    <div style="position:relative">
+      <input type="text" id="codeInput" placeholder="輸入代碼或名稱，如 2330 或 台積電" maxlength="12" autocomplete="off">
+      <div id="codeInputSuggestions" class="autocomplete-list"></div>
+    </div>
     <button type="submit" class="primary">加入</button>
   </form>
   <div id="tiles"></div>
@@ -358,6 +390,7 @@
         <input type="checkbox" id="bollingerToggle">
         布林通道（20,2）
       </label>
+      <button id="intradayPatternBtn" type="button" style="margin-left:4px">📊 日內模式分析（近20日）</button>
     </div>
   </div>
   <div id="chartWrap">
