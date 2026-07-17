@@ -299,6 +299,28 @@ def fetch_stock_daily_rows(code, months=3):
     return []
 
 
+def fetch_stock_daily_rows_for_chart(code, months=3):
+    """給單一股票走勢圖用：Yahoo 收盤後常常要延遲一段時間才會回補最新一兩個
+    交易日的資料，導致圖表看起來卡在前幾天。這裡額外用 TWSE 官方當月資料補上
+    Yahoo 還沒回補的最近交易日。只用在使用者主動點開單一股票的時候，
+    不用在全市場批次掃描（選股篩選）裡，避免拖慢掃描速度。"""
+    rows = fetch_stock_daily_rows(code, months=months)
+    if not rows:
+        return rows
+    last_date = rows[-1][0]
+    today = time.localtime()
+    date_str = f"{today.tm_year:04d}{today.tm_mon:02d}01"
+    url = f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={date_str}&stockNo={code}&response=json"
+    try:
+        d = fetch_json(url, ttl=1800)
+        if d.get("stat") == "OK":
+            extra = [r for r in d.get("data", []) if r[0] > last_date]
+            rows = rows + extra
+    except Exception:
+        pass
+    return rows
+
+
 def fetch_intraday(code):
     """抓最近一個「有資料」的交易日分時走勢。用 range=5d 一次多抓幾天份的
     1 分鐘資料，再取其中最後一個出現的日期──這樣遇到假日、還沒開盤、
@@ -1106,7 +1128,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not code:
                     self._send_json({"error": "missing code"}, 400)
                     return
-                rows = fetch_stock_daily_rows(code, months=months)
+                rows = fetch_stock_daily_rows_for_chart(code, months=months)
                 self._send_json({"code": code, "rows": rows})
                 return
 
