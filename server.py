@@ -1247,6 +1247,205 @@ def run_short_screener(pct_threshold=5.0, trend_days=7, min_trade_value=0):
     return payload
 
 
+# ---------- 選股篩選：高點反轉黑K（放空短線觸發訊號）----------
+
+_reversal_screener_cache = {}
+_reversal_screener_lock = threading.Lock()
+
+
+def fetch_today_ohlc_snapshot():
+    """全市場今日開高低收＋成交量（一次 API 呼叫涵蓋所有上市個股），直接來自證交所，
+    當天收盤後就有，不像 Yahoo 有時候要延遲一兩天才回補最新一天。用來低成本地先篩出
+    「今天收黑K、且上影線夠長」的候選股，再對這些候選股才去抓歷史資料細算。"""
+    url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+    data = fetch_json(url, ttl=300)
+    out = {}
+    for row in data:
+        code = row.get("Code", "")
+        if len(code) != 4 or not code.isdigit() or code.startswith("00"):
+            continue
+        o = safe_float(row.get("OpeningPrice"))
+        h = safe_float(row.get("HighestPrice"))
+        l = safe_float(row.get("LowestPrice"))
+        c = safe_float(row.get("ClosingPrice"))
+        vol = safe_float(row.get("TradeVolume"))
+        if None in (o, h, l, c) or h <= 0:
+            continue
+        out[code] = {"name": row.get("Name", ""), "open": o, "high": h, "low": l, "close": c, "volume": vol}
+    return out
+
+
+def run_reversal_short_screener(near_high_pct=3.0, min_shadow_ratio=1.0, min_trade_value=0):
+    """抓「衝高後拉回」的反轉黑K：今天股價逼近或創近20日新高，卻收出上影線夠長的黑K
+    （代表高點有明顯賣壓、當天買盤沒能守住），用來抓短線放空的早期轉弱訊號——
+    比「多頭轉弱（月線下彎）」篩選器更早一步，月線甚至可能都還沒轉向。基本面／籌碼／
+    融券資料只當輔助確認，主要訊號是當天這根K棒的型態本身。跟其他篩選器一樣，
+    這是對已發生K棒型態的客觀統計，不是對明天走勢的預測。"""
+    cache_key = (round(near_high_pct, 2), round(min_shadow_ratio, 2), int(min_trade_value))
+    with _reversal_screener_lock:
+        hit = _reversal_screener_cache.get(cache_key)
+        if hit and time.time() - hit[0] < 1800:
+            return hit[1]
+
+    ohlc = fetch_today_ohlc_snapshot()
+
+    # 第一階段：光用今天的開高低收就能算出「上影線黑K」，完全不用額外打 API，
+    # 把候選股數量壓到可以接受的範圍，再對這些候選股抓歷史資料細算。
+    stage1 = []
+    for code, v in ohlc.items():
+        o, h, c = v["open"], v["high"], v["close"]
+        if c >= o:
+            continue  # 不是黑K（收盤沒有比開盤低），跳過
+        body = o - c
+        upper_shadow = h - o
+        if body <= 0 or upper_shadow <= 0:
+            continue
+        shadow_ratio = upper_shadow / body
+        if shadow_ratio < min_shadow_ratio:
+            continue
+        stage1.append((code, v, shadow_ratio))
+    stage1.sort(key=lambda x: -x[2])
+    candidates = stage1[:MAX_TREND_CANDIDATES]
+
+    today = time.localtime()
+    today_roc = f"{today.tm_year - 1911}/{today.tm_mon:02d}/{today.tm_mday:02d}"
+
+    def check_one(item):
+        code, v, shadow_ratio = item
+        rows = fetch_stock_daily_rows(code, months=2)
+        if rows and rows[-1][0] == today_roc:
+            rows = rows[:-1]  # 避免 Yahoo 剛好已經回補今天，跟自己比較高點
+        if len(rows) < 20:
+            return None
+
+        highs = [safe_float(r[4]) for r in rows if safe_float(r[4]) is not None]
+        if len(highs) < 20:
+            return None
+        prior_high = max(highs[-20:])
+        if prior_high <= 0 or v["high"] < prior_high * (1 - near_high_pct / 100):
+            return None  # 沒有逼近／創近20日新高，不算「高點」反轉
+
+        recent_values = [safe_float(r[2]) for r in rows[-20:] if safe_float(r[2]) is not None]
+        avg_trade_value = sum(recent_values) / len(recent_values) if recent_values else 0
+        if min_trade_value > 0 and avg_trade_value < min_trade_value:
+            return None
+
+        volumes = [safe_float(r[1]) for r in rows[-5:] if safe_float(r[1]) is not None]
+        avg_vol_5 = sum(volumes) / len(volumes) if volumes else None
+        volume_confirmed = bool(avg_vol_5 and v["volume"] and v["volume"] > avg_vol_5)
+
+        return {
+            "code": code,
+            "name": v["name"],
+            "open": v["open"],
+            "high": v["high"],
+            "low": v["low"],
+            "close": v["close"],
+            "shadow_ratio": round(shadow_ratio, 2),
+            "prior_high": round(prior_high, 2),
+            "pct_from_high": round((v["close"] - prior_high) / prior_high * 100, 2),
+            "avg_trade_value_wan": round(avg_trade_value / 10000),
+            "volume_confirmed": volume_confirmed,
+            "chip_bias_5": compute_volume_bias(rows, 5),
+            "chip_bias_20": compute_volume_bias(rows, 20),
+        }
+
+    results = []
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(check_one, item) for item in candidates]
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except Exception:
+                r = None
+            if r:
+                results.append(r)
+
+    revenue_map = fetch_monthly_revenue()
+    eps_map = fetch_eps()
+    valuation_map = fetch_valuation()
+    disposition_map = fetch_disposition()
+    attention_set = fetch_attention()
+    margin_map = fetch_margin_data()
+    try:
+        holder_map = get_holder_data()
+    except Exception:
+        holder_map = {}
+
+    # 融券限額不存在或為 0：這檔股票根本不能用融券放空，直接排除
+    filtered = []
+    for r in results:
+        margin = margin_map.get(r["code"], {})
+        r["margin_short_limit"] = margin.get("margin_short_limit")
+        r["margin_short_balance"] = margin.get("margin_short_balance")
+        r["margin_short_usage_pct"] = margin.get("margin_short_usage_pct")
+        if r["margin_short_limit"] and r["margin_short_limit"] > 0:
+            filtered.append(r)
+    results = filtered
+
+    for r in results:
+        code = r["code"]
+        rev = revenue_map.get(code, {})
+        r["industry"] = rev.get("industry", "未分類")
+        r["revenue_mom_pct"] = rev.get("revenue_mom_pct")
+        r["revenue_yoy_pct"] = rev.get("revenue_yoy_pct")
+        r["revenue_cum_yoy_pct"] = rev.get("revenue_cum_yoy_pct")
+        eps = eps_map.get(code)
+        r["eps"] = eps["eps"] if eps else None
+        r["eps_period"] = f"{eps['eps_year']}年Q{eps['eps_quarter']}" if eps else None
+        disp = disposition_map.get(code)
+        r["is_disposition"] = disp is not None
+        r["disposition_reason"] = disp["reason"] if disp else None
+        r["is_attention"] = code in attention_set
+
+        val = valuation_map.get(code, {})
+        r["pe_ratio"] = val.get("pe_ratio")
+        r["dividend_yield"] = val.get("dividend_yield")
+
+        holder = holder_map.get(code, {})
+        r["holders_1000"] = holder.get("holders_1000")
+        r["holders_1000_change"] = holder.get("holders_1000_change")
+        r["holders_reliable"] = r["holders_1000"] is not None and r["holders_1000"] >= MIN_RELIABLE_HOLDERS
+
+        # 綜合評分：主要訊號是K棒型態本身（能不能進候選清單看的是上影線比例），
+        # 這裡的分數只是拿量能／基本面／籌碼當「輔助確認」用，不是主要判斷依據
+        score = 0
+        if r["volume_confirmed"]:
+            score += 1  # 當天爆量收黑K，賣壓比較有說服力，不是隨便一根雜訊K棒
+        if r["chip_bias_5"] is not None and r["chip_bias_5"] < 0:
+            score += 1
+        if r["revenue_yoy_pct"] is not None and r["revenue_yoy_pct"] < 0:
+            score += 1
+        if r["eps"] is not None and r["eps"] < 0:
+            score += 1
+        r["pe_high"] = r["pe_ratio"] is not None and r["pe_ratio"] > 40
+        r["pe_missing"] = r["pe_ratio"] is None
+        if r["pe_high"] or r["pe_missing"]:
+            score += 1
+        r["margin_crowded"] = r["margin_short_usage_pct"] is not None and r["margin_short_usage_pct"] >= 80
+        if r["margin_crowded"]:
+            score -= 2
+        if r["is_disposition"] or r["is_attention"]:
+            score -= 3
+        r["fit_score"] = score
+        # 參考價：當天最高價（黑K拒絕的高點，短線放空常用的停損／壓力參考）
+        r["entry_ref_price"] = r["high"]
+
+    results.sort(key=lambda r: (-r["fit_score"], -r["shadow_ratio"]))
+
+    payload = {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "near_high_pct": near_high_pct,
+        "min_shadow_ratio": min_shadow_ratio,
+        "min_trade_value": min_trade_value,
+        "candidates_scanned": len(candidates),
+        "results": results,
+    }
+    with _reversal_screener_lock:
+        _reversal_screener_cache[cache_key] = (time.time(), payload)
+    return payload
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # 安靜一點，不要洗控制台
@@ -1384,6 +1583,17 @@ class Handler(BaseHTTPRequestHandler):
                 min_trade_value_wan = float(qs.get("min_trade_value_wan", ["3000"])[0])
                 payload = run_short_screener(
                     pct_threshold=pct, trend_days=trend_days,
+                    min_trade_value=min_trade_value_wan * 10000,
+                )
+                self._send_json(payload)
+                return
+
+            if parsed.path == "/api/reversal_short_screener":
+                near_high_pct = float(qs.get("near_high_pct", ["3"])[0])
+                min_shadow_ratio = float(qs.get("min_shadow_ratio", ["1"])[0])
+                min_trade_value_wan = float(qs.get("min_trade_value_wan", ["3000"])[0])
+                payload = run_reversal_short_screener(
+                    near_high_pct=near_high_pct, min_shadow_ratio=min_shadow_ratio,
                     min_trade_value=min_trade_value_wan * 10000,
                 )
                 self._send_json(payload)

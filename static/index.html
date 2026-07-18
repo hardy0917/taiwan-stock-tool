@@ -330,6 +330,7 @@
   <button type="button" data-jump="chartCard">走勢圖</button>
   <button type="button" data-jump="screenerCard">選股篩選</button>
   <button type="button" data-jump="shortScreenerCard">放空篩選</button>
+  <button type="button" data-jump="reversalScreenerCard">高點反轉黑K</button>
   <span class="quick-nav-sep"></span>
   <button type="button" id="navSectorBtn">產業資金流向</button>
   <button type="button" id="navMarketBtn">市場總覽</button>
@@ -598,7 +599,7 @@
 
 <section class="card" id="shortScreenerCard">
   <div class="row between" style="margin-bottom:8px">
-    <h2 style="margin:0">選股：空頭轉弱 + 放空篩選（短線 5～10 個交易日參考）</h2>
+    <h2 style="margin:0">選股：多頭轉弱（月線下彎）+ 放空篩選（短線 5～10 個交易日參考）</h2>
     <button id="runShortScreenerBtn" class="primary">開始篩選</button>
   </div>
   <div class="row screener-controls" style="margin-bottom:4px">
@@ -622,7 +623,9 @@
     (4) 放空最大的風險是「軋空」——股價不跌反漲時，回補的買盤會讓漲勢更猛，這份清單有標示相關警示，但無法完全排除這個風險。
   </p>
   <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
-    邏輯跟上面「月線多頭＋財務體質」完全對稱，只是條件全部反過來：找月線走勢向下、營收/EPS/籌碼轉弱、大戶減碼的股票，
+    這份抓的是<strong>月線已經確立向下彎</strong>的股票（不是股價剛跌破月線那種早期訊號），確認訊號比較穩，但相對地也比較晚進場、
+    可能已經跌一段。想抓更早期「剛出現轉弱訊號」的股票，可以看下面「高點反轉黑K」。
+    邏輯跟最上面「月線多頭＋財務體質」完全對稱，只是條件全部反過來：找月線走勢向下、營收/EPS/籌碼轉弱、大戶減碼的股票，
     再用<strong>融資融券餘額表</strong>過濾掉沒辦法用融券放空的股票（融券限額為 0）。<strong>綜合評分</strong>：月營收月增／年增／累計年增為負、
     EPS 為負、月線斜率明顯向下、近20日籌碼偏空、大戶人數減少、本益比偏高或近四季虧損，各符合一項 +1 分；估值已經便宜（本益比≤20）代表下檔有限、倒扣1分；
     有處置或注意公告倒扣3分；「軋空風險」（均線仍在跌但籌碼轉多、大戶增加）倒扣2分；「籌碼背離」（籌碼明顯偏空但營收其實成長，可能只是超跌）倒扣2分；
@@ -669,6 +672,80 @@
     <div class="row" style="gap:8px">
       <button id="shortScreenerPrevBtn" type="button">‹ 上一頁</button>
       <button id="shortScreenerNextBtn" type="button">下一頁 ›</button>
+    </div>
+  </div>
+</section>
+
+<section class="card" id="reversalScreenerCard">
+  <div class="row between" style="margin-bottom:8px">
+    <h2 style="margin:0">選股：高點反轉黑K（放空早期觸發訊號）</h2>
+    <button id="runReversalScreenerBtn" class="primary">開始篩選</button>
+  </div>
+  <div class="row screener-controls" style="margin-bottom:4px">
+    今日高點需逼近／創近20日高點
+    <input type="number" id="reversalNearHighPct" value="3" min="0" max="15" step="0.5">
+    % 以內
+    ・上影線至少為實體
+    <input type="number" id="reversalMinShadowRatio" value="1" min="0.3" max="5" step="0.1">
+    倍
+    ・產業別
+    <select id="reversalIndustryFilter"><option value="">全部</option></select>
+    ・近20日均成交值至少
+    <input type="number" id="reversalMinTradeValue" value="3000" min="0" step="500">
+    萬元
+  </div>
+  <p class="risk-notice">
+    <strong>放空風險比作多更高，請務必先讀完再用：</strong>
+    (1) 放空理論上虧損無上限，跟作多「最多賠光本金」不一樣，部位大小跟停損紀律要更嚴格。
+    (2) 台股現股放空、融券放空都有法規限制（例如「平盤下不得放空」），篩選結果<strong>不代表當下一定能夠成交或有券可以放空</strong>，實際下單以券商回報為準。
+    (3) 融券限額／餘額是<strong>前一交易日</strong>公告的資料，不是即時的。(4) 反轉黑K可能隔天就被完全收復（假突破的假突破），一根K棒不是保證訊號。
+  </p>
+  <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
+    抓的是「衝高後拉回」的早期轉弱訊號：<strong>今天股價逼近或創近20日新高，但收出上影線夠長的黑K</strong>（代表高點有明顯賣壓、買盤沒能守住），
+    比「多頭轉弱（月線下彎）」更早一步——月線這時候可能都還沒轉向，進場點通常在相對高點附近，停損也比較好抓（掛在當天最高點上方）。
+    <strong>上影線比</strong>＝（最高價－開盤價）÷（開盤價－收盤價），數字越大代表當天高點被賣壓拒絕得越明顯。
+    <strong>綜合評分</strong>只是輔助確認，不是主要判斷依據：當天爆量（成交量高於近5日均量）、近5日籌碼偏空、月營收年增為負、EPS為負、
+    本益比偏高或近四季虧損，各符合一項 +1 分；有處置或注意公告倒扣3分；融券空間用超過80%倒扣2分。<strong>參考價</strong>是當天最高價
+    （黑K拒絕的高點，短線放空常用的停損／壓力參考）。同樣，這是對已發生K棒型態的客觀統計，<strong>不是預測明天走勢，也不是放空訊號</strong>。
+  </p>
+  <div id="reversalScreenerStatus"></div>
+  <div style="overflow-x:auto; margin-top:10px">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">代碼</th>
+          <th style="text-align:left">名稱</th>
+          <th style="text-align:left">產業別</th>
+          <th>綜合評分</th>
+          <th>開盤</th>
+          <th>最高</th>
+          <th>最低</th>
+          <th>收盤</th>
+          <th>上影線比</th>
+          <th>近20日高點</th>
+          <th>乖離高點%</th>
+          <th>近20日均成交值(萬)</th>
+          <th>爆量</th>
+          <th>近5日籌碼傾向%</th>
+          <th>月營收YoY%</th>
+          <th>EPS（期別）</th>
+          <th>本益比</th>
+          <th>融券今日餘額</th>
+          <th>融券限額</th>
+          <th>融券使用率%</th>
+          <th style="text-align:left">標記</th>
+        </tr>
+      </thead>
+      <tbody id="reversalScreenerBody">
+        <tr><td colspan="22" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 30-90 秒）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="reversalScreenerPagination" class="row between" style="margin-top:10px; display:none">
+    <span id="reversalScreenerPageInfo" style="font-size:12.5px; color:var(--text-secondary)"></span>
+    <div class="row" style="gap:8px">
+      <button id="reversalScreenerPrevBtn" type="button">‹ 上一頁</button>
+      <button id="reversalScreenerNextBtn" type="button">下一頁 ›</button>
     </div>
   </div>
 </section>
