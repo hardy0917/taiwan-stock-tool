@@ -238,6 +238,12 @@
   @media (prefers-color-scheme: dark) { .badge.attention { color: #eda100; } }
   .badge.category-trend { background: rgba(42,120,214,0.15); color: var(--series-1); }
   .badge.category-pullback { background: rgba(74,58,167,0.15); color: var(--ma20); }
+  .risk-notice {
+    font-size: 11.5px; color: #b8860b; background: rgba(237,161,0,0.12);
+    border: 1px solid rgba(237,161,0,0.35); border-radius: 8px; padding: 8px 10px;
+    margin: 0 0 8px; line-height: 1.7;
+  }
+  @media (prefers-color-scheme: dark) { .risk-notice { color: #eda100; } }
   #dailyWatchlistBody tr { cursor: pointer; }
   #dailyWatchlistBody tr:hover { background: var(--chip-bg); }
   .pos { color: var(--up); }
@@ -323,6 +329,7 @@
   <button type="button" data-jump="watchlistCard">觀察清單</button>
   <button type="button" data-jump="chartCard">走勢圖</button>
   <button type="button" data-jump="screenerCard">選股篩選</button>
+  <button type="button" data-jump="shortScreenerCard">放空篩選</button>
   <span class="quick-nav-sep"></span>
   <button type="button" id="navSectorBtn">產業資金流向</button>
   <button type="button" id="navMarketBtn">市場總覽</button>
@@ -585,6 +592,83 @@
     <div class="row" style="gap:8px">
       <button id="screenerPrevBtn" type="button">‹ 上一頁</button>
       <button id="screenerNextBtn" type="button">下一頁 ›</button>
+    </div>
+  </div>
+</section>
+
+<section class="card" id="shortScreenerCard">
+  <div class="row between" style="margin-bottom:8px">
+    <h2 style="margin:0">選股：空頭轉弱 + 放空篩選（短線 5～10 個交易日參考）</h2>
+    <button id="runShortScreenerBtn" class="primary">開始篩選</button>
+  </div>
+  <div class="row screener-controls" style="margin-bottom:4px">
+    月線乖離
+    <input type="number" id="shortScreenerPct" value="5" min="0.5" max="20" step="0.5">
+    % 以內
+    ・月線走勢確認
+    <input type="number" id="shortScreenerTrendDays" value="7" min="3" max="60" step="1">
+    個交易日前
+    ・產業別
+    <select id="shortIndustryFilter"><option value="">全部</option></select>
+    ・近20日均成交值至少
+    <input type="number" id="shortScreenerMinTradeValue" value="3000" min="0" step="500">
+    萬元
+  </div>
+  <p class="risk-notice">
+    <strong>放空風險比作多更高，請務必先讀完再用：</strong>
+    (1) 放空理論上虧損無上限（股價上漲沒有天花板），跟作多「最多賠光本金」不一樣，部位大小跟停損紀律要更嚴格。
+    (2) 台股現股放空、融券放空都有法規限制（例如「平盤下不得放空」），這份清單只是統計篩選結果，<strong>不代表當下一定能夠成交或有券可以放空</strong>，實際下單以券商回報為準。
+    (3) 融券限額／餘額是<strong>前一交易日</strong>公告的資料，不是即時的，實際可用額度、券源仍可能變動或不足。
+    (4) 放空最大的風險是「軋空」——股價不跌反漲時，回補的買盤會讓漲勢更猛，這份清單有標示相關警示，但無法完全排除這個風險。
+  </p>
+  <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
+    邏輯跟上面「月線多頭＋財務體質」完全對稱，只是條件全部反過來：找月線走勢向下、營收/EPS/籌碼轉弱、大戶減碼的股票，
+    再用<strong>融資融券餘額表</strong>過濾掉沒辦法用融券放空的股票（融券限額為 0）。<strong>綜合評分</strong>：月營收月增／年增／累計年增為負、
+    EPS 為負、月線斜率明顯向下、近20日籌碼偏空、大戶人數減少、本益比偏高或近四季虧損，各符合一項 +1 分；估值已經便宜（本益比≤20）代表下檔有限、倒扣1分；
+    有處置或注意公告倒扣3分；「軋空風險」（均線仍在跌但籌碼轉多、大戶增加）倒扣2分；「籌碼背離」（籌碼明顯偏空但營收其實成長，可能只是超跌）倒扣2分；
+    「融券空間有限」（額度用超過80%）倒扣2分。結果依評分高到低排序。<strong>參考價</strong>是月線本身（技術面常見的反彈壓力參考，不是預測明天價格）。
+    以上全部是用已知公開資料計算的客觀統計，<strong>不是預測明天走勢，也不是放空訊號</strong>，請自行判斷風險。
+  </p>
+  <div id="shortScreenerStatus"></div>
+  <div style="overflow-x:auto; margin-top:10px">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">代碼</th>
+          <th style="text-align:left">名稱</th>
+          <th style="text-align:left">產業別</th>
+          <th>綜合評分</th>
+          <th>收盤</th>
+          <th>月線</th>
+          <th>參考價</th>
+          <th>乖離%</th>
+          <th>月線斜率%</th>
+          <th>近20日籌碼傾向%</th>
+          <th>大戶人數</th>
+          <th>大戶人數變化</th>
+          <th>近20日均成交值(萬)</th>
+          <th>月營收MoM%</th>
+          <th>月營收YoY%</th>
+          <th>累計營收YoY%</th>
+          <th>EPS（期別）</th>
+          <th>本益比</th>
+          <th>殖利率%</th>
+          <th>融券今日餘額</th>
+          <th>融券限額</th>
+          <th>融券使用率%</th>
+          <th style="text-align:left">標記</th>
+        </tr>
+      </thead>
+      <tbody id="shortScreenerBody">
+        <tr><td colspan="23" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 30-60 秒）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="shortScreenerPagination" class="row between" style="margin-top:10px; display:none">
+    <span id="shortScreenerPageInfo" style="font-size:12.5px; color:var(--text-secondary)"></span>
+    <div class="row" style="gap:8px">
+      <button id="shortScreenerPrevBtn" type="button">‹ 上一頁</button>
+      <button id="shortScreenerNextBtn" type="button">下一頁 ›</button>
     </div>
   </div>
 </section>

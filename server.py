@@ -1037,6 +1037,216 @@ def run_screener(pct_threshold=5.0, trend_days=10, long_term=False, min_trade_va
     return payload
 
 
+# ---------- 選股篩選：空頭轉弱 + 放空篩選 ----------
+
+_short_screener_cache = {}
+_short_screener_lock = threading.Lock()
+
+
+def fetch_margin_data():
+    """全市場當日融資融券餘額（一次請求）。放空篩選只需要融券相關欄位：
+    融券限額（沒有值或是 0，代表這檔股票根本不能用融券放空）、融券今日餘額
+    （目前已經被放空的張數）。額度使用率（餘額／限額）越高，代表能加碼放空的
+    空間越小，市場上已經有很多人卡位放空、軋空風險也可能較高。"""
+    url = "https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN"
+    data = fetch_json(url, ttl=1800)
+    out = {}
+    for row in data:
+        code = row.get("股票代號", "")
+        if not code:
+            continue
+        limit = safe_float(row.get("融券限額"))
+        balance = safe_float(row.get("融券今日餘額"))
+        out[code] = {
+            "margin_short_limit": limit,
+            "margin_short_balance": balance,
+            "margin_short_usage_pct": (
+                round(balance / limit * 100, 1) if limit and limit > 0 and balance is not None else None
+            ),
+        }
+    return out
+
+
+def run_short_screener(pct_threshold=5.0, trend_days=7, min_trade_value=0):
+    """跟 run_screener 結構完全對稱，但條件全部反過來找空頭轉弱的股票：
+    月線走勢向下、營收/EPS/籌碼轉弱、大戶減碼——用來抓 5~10 個交易日左右的短線放空
+    切入點參考，不是預測、不是保證獲利。額外用融資融券餘額表過濾掉沒辦法用
+    融券放空的股票，並對融券額度快用完的標的扣分示警（軋空風險）。"""
+    cache_key = (round(pct_threshold, 2), trend_days, int(min_trade_value))
+    with _short_screener_lock:
+        hit = _short_screener_cache.get(cache_key)
+        if hit and time.time() - hit[0] < 1800:
+            return hit[1]
+
+    snapshot = fetch_market_snapshot()
+    stage1_margin = pct_threshold + 15
+    candidates = []
+    for code, v in snapshot.items():
+        rough_proximity = (v["close"] - v["monthly_avg"]) / v["monthly_avg"] * 100
+        if abs(rough_proximity) <= stage1_margin:
+            candidates.append((code, v, rough_proximity))
+    candidates.sort(key=lambda x: abs(x[2]))
+    candidates = candidates[:MAX_TREND_CANDIDATES]
+
+    history_months = max(3, -(-(20 + trend_days) // 20) + 1)
+
+    def check_trend(item):
+        code, v, _rough_proximity = item
+        rows = fetch_stock_daily_rows(code, months=history_months)
+        closes = [safe_float(r[6]) for r in rows if safe_float(r[6]) is not None]
+        ma20 = compute_ma20_series(rows)
+        if len(ma20) <= trend_days or not closes:
+            return None
+
+        recent_values = [safe_float(r[2]) for r in rows[-20:] if safe_float(r[2]) is not None]
+        avg_trade_value = sum(recent_values) / len(recent_values) if recent_values else 0
+        if min_trade_value > 0 and avg_trade_value < min_trade_value:
+            return None
+
+        latest_close = closes[-1]
+        ma20_now = ma20[-1]
+        proximity_pct = (latest_close - ma20_now) / ma20_now * 100
+        if abs(proximity_pct) > pct_threshold:
+            return None
+        trend_down = ma20[-1] < ma20[-1 - trend_days]
+        slope_pct = (ma20[-1] - ma20[-1 - trend_days]) / ma20[-1 - trend_days] * 100
+        if not trend_down:
+            return None
+        return {
+            "code": code,
+            "name": v["name"],
+            "close": latest_close,
+            "monthly_avg": round(ma20_now, 2),
+            "proximity_pct": round(proximity_pct, 2),
+            "ma20_slope_pct": round(slope_pct, 2),
+            "chip_bias_5": compute_volume_bias(rows, 5),
+            "chip_bias_20": compute_volume_bias(rows, 20),
+            "avg_trade_value_wan": round(avg_trade_value / 10000),
+        }
+
+    results = []
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(check_trend, item) for item in candidates]
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except Exception:
+                r = None
+            if r:
+                results.append(r)
+
+    revenue_map = fetch_monthly_revenue()
+    eps_map = fetch_eps()
+    valuation_map = fetch_valuation()
+    disposition_map = fetch_disposition()
+    attention_set = fetch_attention()
+    margin_map = fetch_margin_data()
+    try:
+        holder_map = get_holder_data()
+    except Exception:
+        holder_map = {}
+
+    # 融券限額不存在或為 0：這檔股票根本不能用融券放空，直接排除，不然清單沒有意義
+    filtered = []
+    for r in results:
+        margin = margin_map.get(r["code"], {})
+        r["margin_short_limit"] = margin.get("margin_short_limit")
+        r["margin_short_balance"] = margin.get("margin_short_balance")
+        r["margin_short_usage_pct"] = margin.get("margin_short_usage_pct")
+        if r["margin_short_limit"] and r["margin_short_limit"] > 0:
+            filtered.append(r)
+    results = filtered
+
+    for r in results:
+        code = r["code"]
+        rev = revenue_map.get(code, {})
+        r["industry"] = rev.get("industry", "未分類")
+        r["revenue_mom_pct"] = rev.get("revenue_mom_pct")
+        r["revenue_yoy_pct"] = rev.get("revenue_yoy_pct")
+        r["revenue_cum_yoy_pct"] = rev.get("revenue_cum_yoy_pct")
+        eps = eps_map.get(code)
+        r["eps"] = eps["eps"] if eps else None
+        r["eps_period"] = f"{eps['eps_year']}年Q{eps['eps_quarter']}" if eps else None
+        disp = disposition_map.get(code)
+        r["is_disposition"] = disp is not None
+        r["disposition_reason"] = disp["reason"] if disp else None
+        r["is_attention"] = code in attention_set
+
+        val = valuation_map.get(code, {})
+        r["pe_ratio"] = val.get("pe_ratio")
+        r["dividend_yield"] = val.get("dividend_yield")
+        r["pb_ratio"] = val.get("pb_ratio")
+
+        holder = holder_map.get(code, {})
+        r["holders_1000"] = holder.get("holders_1000")
+        r["holders_1000_change"] = holder.get("holders_1000_change")
+        r["holders_report_date"] = holder.get("report_date")
+        r["holders_reliable"] = r["holders_1000"] is not None and r["holders_1000"] >= MIN_RELIABLE_HOLDERS
+
+        # 籌碼背離警示（放空版）：近20日籌碼明顯偏空、但營收年增卻明顯成長，
+        # 代表賣壓可能只是短線超跌、不是基本面真的在惡化，追空風險較高
+        r["chip_revenue_divergence"] = bool(
+            r["chip_bias_20"] is not None and r["chip_bias_20"] < -20
+            and r["revenue_yoy_pct"] is not None and r["revenue_yoy_pct"] > 10
+        )
+
+        # 綜合評分：純粹統計「符合你設定的空頭＋體質轉弱＋籌碼條件」的程度，不是預測、不是放空訊號
+        score = 0
+        if r["revenue_mom_pct"] is not None and r["revenue_mom_pct"] < 0:
+            score += 1
+        if r["revenue_yoy_pct"] is not None and r["revenue_yoy_pct"] < 0:
+            score += 1
+        if r["revenue_cum_yoy_pct"] is not None and r["revenue_cum_yoy_pct"] < 0:
+            score += 1
+        if r["eps"] is not None and r["eps"] < 0:
+            score += 1
+        if r["ma20_slope_pct"] < -3:
+            score += 1
+        # 本益比（放空版）：估值偏貴或近四季虧損都算是支持放空論點；已經跌到便宜估值代表下檔有限，扣分
+        r["pe_high"] = r["pe_ratio"] is not None and r["pe_ratio"] > 40
+        r["pe_missing"] = r["pe_ratio"] is None
+        if r["pe_high"] or r["pe_missing"]:
+            score += 1
+        elif r["pe_ratio"] is not None and 0 < r["pe_ratio"] <= 20:
+            score -= 1
+        if r["chip_revenue_divergence"]:
+            score -= 2
+        elif r["chip_bias_20"] is not None and r["chip_bias_20"] < 0:
+            score += 1
+        if r["holders_reliable"] and r["holders_1000_change"] is not None and r["holders_1000_change"] < 0:
+            score += 1
+        if r["is_disposition"] or r["is_attention"]:
+            score -= 3  # 處置/注意股波動大、成交限制多，放空進出場風險高，不列入「較符合條件」
+        # 「軋空」風險粗略警示：均線仍在跌，但近20日籌碼傾向偏多且大戶人數增加 → 可能有人低接、醞釀反彈
+        r["squeeze_risk"] = bool(
+            r["chip_bias_20"] is not None and r["chip_bias_20"] > 10
+            and r["holders_reliable"] and r["holders_1000_change"] is not None and r["holders_1000_change"] > 0
+        )
+        if r["squeeze_risk"]:
+            score -= 2
+        # 融券額度用得越滿，能加碼放空的空間越小，市場上已經很多人卡位放空，軋空風險也較高
+        r["margin_crowded"] = r["margin_short_usage_pct"] is not None and r["margin_short_usage_pct"] >= 80
+        if r["margin_crowded"]:
+            score -= 2
+        r["fit_score"] = score
+        # 參考價＝月線本身（技術面常見的反彈壓力參考，不是預測明天價格）
+        r["entry_ref_price"] = r["monthly_avg"]
+
+    results.sort(key=lambda r: (-r["fit_score"], abs(r["proximity_pct"])))
+
+    payload = {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "pct_threshold": pct_threshold,
+        "trend_days": trend_days,
+        "min_trade_value": min_trade_value,
+        "candidates_scanned": len(candidates),
+        "results": results,
+    }
+    with _short_screener_lock:
+        _short_screener_cache[cache_key] = (time.time(), payload)
+    return payload
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # 安靜一點，不要洗控制台
@@ -1163,6 +1373,17 @@ class Handler(BaseHTTPRequestHandler):
                 min_trade_value_wan = float(qs.get("min_trade_value_wan", ["3000"])[0])
                 payload = run_screener(
                     pct_threshold=pct, trend_days=trend_days, long_term=long_term,
+                    min_trade_value=min_trade_value_wan * 10000,
+                )
+                self._send_json(payload)
+                return
+
+            if parsed.path == "/api/short_screener":
+                pct = float(qs.get("pct", ["5"])[0])
+                trend_days = int(qs.get("trend_days", ["7"])[0])
+                min_trade_value_wan = float(qs.get("min_trade_value_wan", ["3000"])[0])
+                payload = run_short_screener(
+                    pct_threshold=pct, trend_days=trend_days,
                     min_trade_value=min_trade_value_wan * 10000,
                 )
                 self._send_json(payload)

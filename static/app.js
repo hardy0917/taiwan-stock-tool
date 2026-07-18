@@ -1700,6 +1700,202 @@
   $("#runScreenerBtn").addEventListener("click", runScreener);
   industryFilter.addEventListener("change", () => { screenerPage = 1; renderScreenerTable(); });
 
+  // ---------- screener: 空頭轉弱 + 放空篩選 ----------
+  const shortScreenerBody = $("#shortScreenerBody");
+  const shortScreenerStatus = $("#shortScreenerStatus");
+  const shortIndustryFilter = $("#shortIndustryFilter");
+  let shortScreenerResults = [];
+  let shortScreenerPage = 1;
+
+  function populateShortIndustryFilter(results) {
+    const industries = [...new Set(results.map((r) => r.industry))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+    const current = shortIndustryFilter.value;
+    shortIndustryFilter.innerHTML = '<option value="">全部</option>';
+    for (const ind of industries) {
+      const opt = document.createElement("option");
+      opt.value = ind;
+      opt.textContent = ind;
+      shortIndustryFilter.appendChild(opt);
+    }
+    if (industries.includes(current)) shortIndustryFilter.value = current;
+  }
+
+  function renderShortScreenerTable() {
+    const industry = shortIndustryFilter.value;
+    const rows = industry ? shortScreenerResults.filter((r) => r.industry === industry) : shortScreenerResults;
+
+    const pagination = $("#shortScreenerPagination");
+    shortScreenerBody.innerHTML = "";
+    if (!rows.length) {
+      shortScreenerBody.innerHTML = `<tr><td colspan="23" class="empty">沒有符合條件的股票</td></tr>`;
+      pagination.style.display = "none";
+      return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(rows.length / SCREENER_PAGE_SIZE));
+    shortScreenerPage = Math.min(Math.max(1, shortScreenerPage), totalPages);
+    const pageRows = rows.slice((shortScreenerPage - 1) * SCREENER_PAGE_SIZE, shortScreenerPage * SCREENER_PAGE_SIZE);
+
+    for (const r of pageRows) {
+      const tr = document.createElement("tr");
+
+      const textCell = (text, alignLeft) => {
+        const td = document.createElement("td");
+        if (alignLeft) td.style.textAlign = "left";
+        td.textContent = text;
+        return td;
+      };
+      const pctCell = (val) => {
+        const td = document.createElement("td");
+        if (val === null || val === undefined || Number.isNaN(val)) {
+          td.textContent = "-";
+        } else {
+          td.className = val > 0 ? "pos" : val < 0 ? "neg" : "flat";
+          td.textContent = `${val > 0 ? "+" : ""}${val.toFixed(1)}%`;
+        }
+        return td;
+      };
+
+      tr.appendChild(textCell(r.code, true));
+      tr.appendChild(textCell(r.name, true));
+      tr.appendChild(textCell(r.industry, true));
+      const scoreTd = document.createElement("td");
+      scoreTd.className = r.fit_score > 0 ? "pos" : r.fit_score < 0 ? "neg" : "flat";
+      scoreTd.style.fontWeight = "700";
+      scoreTd.textContent = (r.fit_score > 0 ? "+" : "") + r.fit_score;
+      tr.appendChild(scoreTd);
+      tr.appendChild(textCell(fmtNum(r.close)));
+      tr.appendChild(textCell(fmtNum(r.monthly_avg)));
+      tr.appendChild(textCell(fmtNum(r.entry_ref_price)));
+      tr.appendChild(pctCell(r.proximity_pct));
+      tr.appendChild(pctCell(r.ma20_slope_pct));
+      tr.appendChild(pctCell(r.chip_bias_20));
+      const holdersTd = textCell(r.holders_1000 != null ? `${r.holders_1000}` : "-");
+      if (r.holders_1000 != null && !r.holders_reliable) {
+        holdersTd.textContent += "（樣本少）";
+        holdersTd.title = "大戶人數低於5人，變化%統計上不可靠，未列入評分";
+        holdersTd.style.color = "var(--text-muted)";
+      }
+      tr.appendChild(holdersTd);
+      const holderChgTd = document.createElement("td");
+      if (!r.holders_reliable) {
+        holderChgTd.textContent = "-";
+        holderChgTd.className = "flat";
+      } else if (r.holders_1000_change == null) {
+        holderChgTd.textContent = "-";
+      } else {
+        holderChgTd.className = r.holders_1000_change > 0 ? "pos" : r.holders_1000_change < 0 ? "neg" : "flat";
+        holderChgTd.textContent = `${r.holders_1000_change > 0 ? "+" : ""}${r.holders_1000_change}`;
+      }
+      tr.appendChild(holderChgTd);
+      tr.appendChild(textCell(r.avg_trade_value_wan != null ? r.avg_trade_value_wan.toLocaleString("zh-TW") : "-"));
+      tr.appendChild(pctCell(r.revenue_mom_pct));
+      tr.appendChild(pctCell(r.revenue_yoy_pct));
+      tr.appendChild(pctCell(r.revenue_cum_yoy_pct));
+      tr.appendChild(textCell(
+        r.eps !== null && r.eps !== undefined ? `${fmtNum(r.eps)}（${r.eps_period}）` : "-"
+      ));
+      const peTd = textCell(r.pe_ratio != null ? fmtNum(r.pe_ratio) : "-");
+      if (r.pe_high || r.pe_missing) peTd.className = "pos";
+      tr.appendChild(peTd);
+      tr.appendChild(textCell(r.dividend_yield != null ? `${fmtNum(r.dividend_yield)}%` : "-"));
+      tr.appendChild(textCell(r.margin_short_balance != null ? r.margin_short_balance.toLocaleString("zh-TW") : "-"));
+      tr.appendChild(textCell(r.margin_short_limit != null ? r.margin_short_limit.toLocaleString("zh-TW") : "-"));
+      const usageTd = textCell(r.margin_short_usage_pct != null ? `${r.margin_short_usage_pct}%` : "-");
+      if (r.margin_crowded) {
+        usageTd.className = "neg";
+        usageTd.title = "融券額度用超過80%，能加碼放空的空間有限";
+      }
+      tr.appendChild(usageTd);
+
+      const badgeCell = document.createElement("td");
+      badgeCell.style.textAlign = "left";
+      if (r.is_disposition) {
+        const b = document.createElement("span");
+        b.className = "badge disposition";
+        b.textContent = "處置股";
+        if (r.disposition_reason) b.title = r.disposition_reason;
+        badgeCell.appendChild(b);
+      }
+      if (r.is_attention) {
+        const b = document.createElement("span");
+        b.className = "badge attention";
+        b.textContent = "注意股";
+        badgeCell.appendChild(b);
+      }
+      if (r.squeeze_risk) {
+        const b = document.createElement("span");
+        b.className = "badge disposition";
+        b.textContent = "⚠ 軋空風險";
+        b.title = "月線仍在跌，但近20日籌碼轉多且大戶人數增加，可能有人低接、醞釀反彈";
+        badgeCell.appendChild(b);
+      }
+      if (r.chip_revenue_divergence) {
+        const b = document.createElement("span");
+        b.className = "badge attention";
+        b.textContent = "⚠ 可能超跌";
+        b.title = "近20日籌碼明顯偏空，但營收年增其實成長，賣壓可能是短線超跌而非基本面惡化";
+        badgeCell.appendChild(b);
+      }
+      if (r.margin_crowded) {
+        const b = document.createElement("span");
+        b.className = "badge attention";
+        b.textContent = "融券空間有限";
+        b.title = "融券額度已使用超過80%";
+        badgeCell.appendChild(b);
+      }
+      if (!r.is_disposition && !r.is_attention && !r.squeeze_risk && !r.chip_revenue_divergence && !r.margin_crowded) {
+        badgeCell.textContent = "-";
+      }
+      tr.appendChild(badgeCell);
+
+      tr.addEventListener("click", () => selectStock(r.code, r.name));
+      shortScreenerBody.appendChild(tr);
+    }
+
+    pagination.style.display = totalPages > 1 ? "flex" : "none";
+    $("#shortScreenerPageInfo").textContent = `共 ${rows.length} 筆・第 ${shortScreenerPage} / ${totalPages} 頁`;
+    $("#shortScreenerPrevBtn").disabled = shortScreenerPage <= 1;
+    $("#shortScreenerNextBtn").disabled = shortScreenerPage >= totalPages;
+  }
+
+  $("#shortScreenerPrevBtn").addEventListener("click", () => {
+    if (shortScreenerPage > 1) { shortScreenerPage -= 1; renderShortScreenerTable(); }
+  });
+  $("#shortScreenerNextBtn").addEventListener("click", () => {
+    shortScreenerPage += 1;
+    renderShortScreenerTable();
+  });
+
+  async function runShortScreener() {
+    const pct = parseFloat($("#shortScreenerPct").value) || 5;
+    const trendDays = parseInt($("#shortScreenerTrendDays").value, 10) || 7;
+    const minTradeValueWan = parseFloat($("#shortScreenerMinTradeValue").value) || 0;
+    const btn = $("#runShortScreenerBtn");
+    btn.disabled = true;
+    shortScreenerStatus.innerHTML = `<span class="spinner"></span>掃描全市場中，首次掃描可能需要 30-60 秒…`;
+    shortScreenerBody.innerHTML = `<tr><td colspan="23" class="empty">掃描中…</td></tr>`;
+    try {
+      const res = await fetch(`/api/short_screener?pct=${pct}&trend_days=${trendDays}&min_trade_value_wan=${minTradeValueWan}`);
+      const data = await res.json();
+      shortScreenerResults = data.results || [];
+      shortScreenerPage = 1;
+      populateShortIndustryFilter(shortScreenerResults);
+      renderShortScreenerTable();
+      shortScreenerStatus.textContent =
+        `掃描 ${data.candidates_scanned} 檔候選股，符合條件（且可融券）${shortScreenerResults.length} 檔・更新於 ${data.generated_at}`;
+    } catch (err) {
+      shortScreenerStatus.textContent = "掃描失敗，請稍後再試";
+      shortScreenerBody.innerHTML = `<tr><td colspan="23" class="empty">掃描失敗</td></tr>`;
+      console.error(err);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $("#runShortScreenerBtn").addEventListener("click", runShortScreener);
+  shortIndustryFilter.addEventListener("change", () => { shortScreenerPage = 1; renderShortScreenerTable(); });
+
   // ---------- 產業資金流向 ----------
   const sectorFlowBody = $("#sectorFlowBody");
   const sectorFlowStatus = $("#sectorFlowStatus");
