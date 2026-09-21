@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>台股分析工具</title>
+<script>
+  // 在畫面畫出來之前就先套用主題，避免先閃一下錯的顏色再跳成使用者選的深/淺色
+  (() => {
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved === "dark" || saved === "light") document.documentElement.dataset.theme = saved;
+    } catch {}
+  })();
+</script>
 <style>
   :root {
     --surface-1:      #fcfcfb;
@@ -22,8 +31,25 @@
     --down:           #0ca30c;
     --chip-bg:        #f0efec;
   }
+  :root[data-theme="dark"] {
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+    --ma5:            #3987e5;
+    --ma20:           #9085e9;
+    --ma60:           #d95926;
+    --up:             #e66767;
+    --down:           #1baf7a;
+    --chip-bg:        #26261f;
+  }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --surface-1:      #1a1a19;
       --page:           #0d0d0d;
       --text-primary:   #ffffff;
@@ -49,14 +75,19 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   html { scroll-padding-top: 64px; }
-  body { padding: 24px; max-width: 1180px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0; }
-  h2 { font-size: 15px; margin: 0 0 12px; color: var(--text-secondary); font-weight: 600; }
+  body { padding: 24px; max-width: 1180px; margin: 0 auto; overflow-x: hidden; }
+  h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+  h2 {
+    font-size: 14.5px; margin: 0 0 12px; color: var(--text-primary); font-weight: 700;
+    display: flex; align-items: center; gap: 8px;
+  }
+  h2::before { content: ""; width: 3px; height: 14px; border-radius: 2px; background: var(--series-1); display: inline-block; }
   header.top {
     display: flex; align-items: baseline; justify-content: space-between;
     margin-bottom: 20px; flex-wrap: wrap; gap: 8px;
   }
   #lastUpdated { font-size: 12px; color: var(--text-muted); }
+  #themeToggleBtn { padding: 6px 10px; font-size: 14px; line-height: 1; }
   #indicesBar { flex-basis: 100%; display: flex; justify-content: flex-end; gap: 14px; flex-wrap: wrap; font-size: 12px; }
   #indicesBar .idx-item { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
   #indicesBar .idx-name { color: var(--text-muted); }
@@ -64,27 +95,37 @@
   #indicesBar .idx-chg { font-variant-numeric: tabular-nums; }
   .quick-nav {
     position: sticky; top: 0; z-index: 50;
-    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-    background: var(--page); padding: 10px 0; margin: 0 0 16px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+    background: var(--page); padding: 12px 0; margin: 0 0 20px;
     border-bottom: 1px solid var(--gridline);
   }
-  .quick-nav button { font-size: 12.5px; padding: 5px 10px; }
-  .quick-nav .quick-nav-sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 4px; }
+  .quick-nav button {
+    font-size: 12.5px; padding: 6px 12px; border-radius: 999px;
+    border-color: transparent; background: transparent; color: var(--text-secondary);
+  }
+  .quick-nav button:hover { background: var(--chip-bg); color: var(--text-primary); }
+  .quick-nav .quick-nav-sep { width: 1px; align-self: stretch; background: var(--border); margin: 4px 6px; }
   button {
     font-family: inherit; font-size: 13px; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface-1);
-    color: var(--text-primary); border-radius: 6px; padding: 6px 12px;
+    color: var(--text-primary); border-radius: 7px; padding: 6px 12px;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.06s ease;
   }
   button:hover { background: var(--chip-bg); }
+  button:active { transform: scale(0.97); }
   button.primary { background: var(--series-1); color: #fff; border-color: transparent; }
-  input[type=text] {
+  button.primary:hover { filter: brightness(1.08); background: var(--series-1); }
+  button.ghost { border-color: transparent; background: transparent; color: var(--text-secondary); }
+  button.ghost:hover { background: var(--chip-bg); color: var(--text-primary); }
+  input[type=text], input[type=number], select {
     font-family: inherit; font-size: 13px; padding: 6px 10px;
-    border: 1px solid var(--border); border-radius: 6px;
+    border: 1px solid var(--border); border-radius: 7px;
     background: var(--surface-1); color: var(--text-primary);
   }
   .card {
     background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 16px; margin-bottom: 20px;
+    border-radius: 12px; padding: 18px; margin-bottom: 20px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(0,0,0,0.03);
   }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .row.between { justify-content: space-between; }
@@ -128,6 +169,29 @@
   #chartTitle { font-size: 14px; font-weight: 600; }
   #chartMeta { font-size: 12px; color: var(--text-muted); }
   .ranges button.active { background: var(--series-1); color: #fff; border-color: transparent; }
+  .chart-periods {
+    display: inline-flex; gap: 2px; background: var(--page); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px; flex-wrap: wrap;
+  }
+  .chart-periods button {
+    border: none; background: transparent; border-radius: 999px;
+    padding: 5px 11px; font-size: 12px; color: var(--text-secondary);
+  }
+  .chart-periods button:hover { background: var(--chip-bg); color: var(--text-primary); }
+  .chart-periods button.active {
+    background: var(--surface-1); color: var(--text-primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  .chart-tools {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--gridline);
+  }
+  .chart-tools-check {
+    display: flex; align-items: center; gap: 5px; font-size: 12.5px;
+    color: var(--text-secondary); cursor: pointer; padding: 6px 8px;
+  }
+  .chart-tools-sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 6px; }
+  .chart-tools button.ghost { font-size: 12.5px; padding: 6px 10px; }
   #chartWrap { position: relative; margin-top: 10px; }
   svg#chart { width: 100%; height: 260px; display: block; overflow: visible; }
   .gridline { stroke: var(--gridline); stroke-width: 1; }
@@ -206,16 +270,68 @@
   .pattern-modal .candle-pattern-row .cp-desc { flex: 1; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
   #analysisPanel .disclaimer { color: var(--text-muted); font-size: 11px; margin-top: 8px; }
 
+  /* 策略回測 */
+  .backtest-modal .bt-form { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--gridline); }
+  .backtest-modal .bt-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  .backtest-modal .bt-field input, .backtest-modal .bt-field select { font-size: 13px; padding: 5px 7px; }
+  .backtest-modal .bt-field.checkbox { flex-direction: row; align-items: center; gap: 6px; }
+  .backtest-modal .ref-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0 16px; }
+  .backtest-modal .ref-item { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .backtest-modal .ref-item .label { font-size: 11px; color: var(--text-muted); }
+  .backtest-modal .ref-item .value { font-size: 15px; font-variant-numeric: tabular-nums; font-weight: 600; margin-top: 2px; }
+  .backtest-modal .bt-equity-wrap { margin: 4px 0 18px; }
+  .backtest-modal .bt-equity-svg { width: 100%; height: 160px; display: block; }
+  .backtest-modal .bt-candle-wrap { margin: 4px 0 6px; }
+  .backtest-modal .bt-candle-svg { width: 100%; height: 240px; display: block; }
+  .backtest-modal .bt-marker.buy { fill: var(--series-1); }
+  .backtest-modal .bt-marker.sell { fill: #a855f7; }
+  .backtest-modal .bt-candle-legend { display: flex; gap: 16px; font-size: 11.5px; color: var(--text-secondary); margin-bottom: 12px; }
+  .backtest-modal .bt-candle-legend .item { display: flex; align-items: center; gap: 5px; }
+  .backtest-modal .bt-candle-legend .swatch { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; }
+  .backtest-modal .bt-candle-legend .swatch.buy { border-bottom: 8px solid var(--series-1); }
+  .backtest-modal .bt-candle-legend .swatch.sell { border-top: 8px solid #a855f7; }
+  .backtest-modal h4 { font-size: 13px; margin: 18px 0 8px; color: var(--text-secondary); }
+  .backtest-modal .bt-live-box { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+  .backtest-modal .bt-live-verdict { font-size: 14px; font-weight: 600; }
+  .backtest-modal .bt-live-verdict.up { color: var(--up); }
+  .backtest-modal .bt-live-verdict.down { color: var(--down); }
+  .backtest-modal .bt-live-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; line-height: 1.6; }
+  .backtest-modal table tbody tr[data-strategy]:hover { background: var(--chip-bg); }
+  .backtest-modal table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .backtest-modal th, .backtest-modal td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--gridline); white-space: nowrap; }
+  .backtest-modal th:first-child, .backtest-modal td:first-child { text-align: left; }
+  .backtest-modal .disclaimer { color: var(--text-muted); font-size: 11px; margin-top: 12px; line-height: 1.6; }
+
+  /* 個股基本面分析 */
+  .fundamentals-modal .ref-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0 16px; }
+  .fundamentals-modal .ref-item { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .fundamentals-modal .ref-item .label { font-size: 11px; color: var(--text-muted); }
+  .fundamentals-modal .ref-item .value { font-size: 15px; font-variant-numeric: tabular-nums; font-weight: 600; margin-top: 2px; }
+  .fundamentals-modal h4 { font-size: 13px; margin: 18px 0 8px; color: var(--text-secondary); }
+  .fundamentals-modal .note { color: var(--text-secondary); line-height: 1.7; font-size: 12.5px; }
+  .fundamentals-modal .disclaimer { color: var(--text-muted); font-size: 11px; margin-top: 12px; line-height: 1.6; }
+  .fundamentals-modal .pe-band-svg { width: 100%; height: 240px; display: block; }
+  .fundamentals-modal .pe-band-legend { display: flex; gap: 14px; font-size: 11.5px; color: var(--text-secondary); margin: 6px 0 12px; flex-wrap: wrap; }
+  .fundamentals-modal .pe-band-legend .item { display: flex; align-items: center; gap: 5px; }
+  .fundamentals-modal .pe-band-legend .swatch { width: 14px; height: 2px; display: inline-block; }
+  .fundamentals-modal table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .fundamentals-modal th, .fundamentals-modal td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--gridline); }
+  .fundamentals-modal .mi-date { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; }
+
   /* table */
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   thead th {
-    text-align: right; color: var(--text-muted); font-weight: 500;
-    border-bottom: 1px solid var(--gridline); padding: 6px 8px; cursor: pointer; white-space: nowrap;
+    text-align: right; color: var(--text-muted); font-weight: 600; font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: 0.02em;
+    border-bottom: 1px solid var(--gridline); padding: 8px 10px; cursor: pointer; white-space: nowrap;
+    transition: color 0.12s ease;
   }
+  thead th:hover { color: var(--text-primary); }
   thead th:first-child, thead th:nth-child(2) { text-align: left; }
-  thead th.sorted { color: var(--text-primary); }
-  tbody td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+  thead th.sorted { color: var(--series-1); }
+  tbody td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
   tbody td:first-child, tbody td:nth-child(2) { text-align: left; font-variant-numeric: normal; }
+  tbody tr { transition: background 0.1s ease; }
   tbody tr:hover { background: var(--chip-bg); cursor: pointer; }
   .chips button { border-radius: 999px; padding: 5px 12px; }
   .chips button.active { background: var(--series-1); color: #fff; border-color: transparent; }
@@ -230,22 +346,68 @@
   .flow-bar-fill.neg { background: var(--down); right: 50%; }
   #sectorFlowBody tr { cursor: pointer; }
   #sectorFlowBody tr:hover { background: var(--chip-bg); }
+  #sectorViewTodayBtn.active, #sectorViewHeatmapBtn.active, #sectorViewTreemapBtn.active { background: var(--series-1); color: #fff; border-color: transparent; }
+  .treemap-legend { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; }
+  .treemap-legend .chip { padding: 2px 8px; border-radius: 4px; font-weight: 600; font-variant-numeric: tabular-nums; color: #fff; }
+  .treemap-wrap {
+    position: relative; width: 100%; height: 460px; border-radius: 10px; overflow: hidden;
+    background: #14141a; border: 1px solid var(--border);
+  }
+  #homeTreemapCard .treemap-wrap { height: 300px; } /* 實際高度由 JS 量測剩餘空間後動態設定，這裡只是還沒跑 JS 前的預設值 */
+  :root[data-theme="light"] .treemap-wrap { background: #1c1c22; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .treemap-wrap { background: #1c1c22; } }
+  .treemap-cell {
+    position: absolute; box-sizing: border-box; border: 1px solid rgba(0,0,0,0.35);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    overflow: hidden; cursor: pointer; padding: 3px; text-align: center;
+    transition: filter 0.1s ease;
+  }
+  .treemap-cell:hover { filter: brightness(1.15); }
+  .treemap-cell .tc-name { color: #fff; font-weight: 700; line-height: 1.25; text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+  .treemap-cell .tc-pct { color: rgba(255,255,255,0.92); font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+  .heatmap-table { border-collapse: collapse; font-size: 11.5px; white-space: nowrap; }
+  .heatmap-table th, .heatmap-table td { padding: 5px 8px; text-align: center; }
+  .heatmap-table th { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .heatmap-table .heatmap-industry {
+    position: sticky; left: 0; text-align: left; background: var(--surface-1);
+    border-right: 1px solid var(--gridline); cursor: pointer;
+  }
+  .heatmap-table tr:hover .heatmap-industry { background: var(--chip-bg); }
+
+  /* news */
+  .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .news-list li { border-bottom: 1px solid var(--gridline); }
+  .news-list li:last-child { border-bottom: none; }
+  .news-list a {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    padding: 10px 4px; color: var(--text-primary); text-decoration: none; font-size: 13.5px;
+  }
+  .news-list a:hover { background: var(--chip-bg); }
+  .news-list .news-title { flex: 1; line-height: 1.5; }
+  .news-list .news-time { flex-shrink: 0; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .heatmap-table .heatmap-cell { font-variant-numeric: tabular-nums; min-width: 46px; }
+  .heatmap-table .heatmap-cell.empty-cell { color: var(--text-muted); }
 
   /* screener */
-  .screener-controls { font-size: 12.5px; color: var(--text-secondary); }
+  .screener-controls {
+    font-size: 12.5px; color: var(--text-secondary);
+    background: var(--page); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; gap: 6px 10px;
+  }
   .screener-controls input[type=number] {
     font-family: inherit; font-size: 13px; padding: 5px 8px; width: 60px;
-    border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); color: var(--text-primary);
   }
   .screener-controls select {
     font-family: inherit; font-size: 13px; padding: 5px 8px;
-    border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); color: var(--text-primary);
   }
   #screenerStatus { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
   .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; margin-left: 4px; white-space: nowrap; }
   .badge.disposition { background: rgba(208,59,59,0.15); color: var(--up); }
   .badge.attention { background: rgba(237,161,0,0.18); color: #b8860b; }
-  @media (prefers-color-scheme: dark) { .badge.attention { color: #eda100; } }
+  :root[data-theme="dark"] .badge.attention { color: #eda100; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .badge.attention { color: #eda100; } }
   .badge.category-trend { background: rgba(42,120,214,0.15); color: var(--series-1); }
   .badge.category-pullback { background: rgba(74,58,167,0.15); color: var(--ma20); }
   .risk-notice {
@@ -253,7 +415,8 @@
     border: 1px solid rgba(237,161,0,0.35); border-radius: 8px; padding: 8px 10px;
     margin: 0 0 8px; line-height: 1.7;
   }
-  @media (prefers-color-scheme: dark) { .risk-notice { color: #eda100; } }
+  :root[data-theme="dark"] .risk-notice { color: #eda100; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .risk-notice { color: #eda100; } }
   #dailyWatchlistBody tr { cursor: pointer; }
   #dailyWatchlistBody tr:hover { background: var(--chip-bg); }
   .pos { color: var(--up); }
@@ -283,8 +446,9 @@
     display: inline-block; font-size: 12px; font-weight: 600; padding: 4px 12px;
     border-radius: 999px; background: rgba(237,161,0,0.18); color: #b8860b; margin-bottom: 16px;
   }
-  @media (prefers-color-scheme: dark) { #maintenanceOverlay .status-badge { color: #eda100; } }
-  #maintenanceOverlay h2 { font-size: 18px; margin: 0 0 10px; }
+  :root[data-theme="dark"] #maintenanceOverlay .status-badge { color: #eda100; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #maintenanceOverlay .status-badge { color: #eda100; } }
+  #maintenanceOverlay h2 { font-size: 18px; margin: 0 0 10px; justify-content: center; }
   #maintenanceOverlay p { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 8px; }
   #maintenanceOverlay .retry-note { font-size: 11.5px; color: var(--text-muted); margin-top: 16px; }
 
@@ -329,25 +493,40 @@
   <h1>台股分析工具</h1>
   <div class="row">
     <span id="lastUpdated"></span>
+    <button id="themeToggleBtn" title="切換深／淺色介面" aria-label="切換深／淺色介面">🌙</button>
     <button id="refreshBtn">重新整理</button>
   </div>
   <div id="indicesBar"></div>
 </header>
 
 <nav class="quick-nav" id="quickNav">
-  <button type="button" data-jump="dailyWatchlistCard">📋 明日觀察清單</button>
-  <button type="button" data-jump="watchlistCard">觀察清單</button>
-  <button type="button" data-jump="chartCard">走勢圖</button>
-  <button type="button" data-jump="screenerCard">選股篩選</button>
-  <button type="button" data-jump="shortScreenerCard">放空篩選</button>
-  <button type="button" data-jump="reversalScreenerCard">高點反轉黑K</button>
+  <button type="button" id="navDailyWatchlistBtn">📋 明日觀察清單</button>
+  <button type="button" id="navWatchlistBtn">觀察清單</button>
+  <button type="button" id="navScreenerBtn">選股篩選</button>
+  <button type="button" id="navShortScreenerBtn">放空篩選</button>
+  <button type="button" id="navReversalScreenerBtn">高點反轉黑K</button>
+  <span class="quick-nav-sep"></span>
+  <button type="button" id="navUsdJpyBtn">美元/日圓</button>
+  <button type="button" id="navUsdTwdBtn">美元/台幣</button>
   <span class="quick-nav-sep"></span>
   <button type="button" id="navSectorBtn">產業資金流向</button>
   <button type="button" id="navMarketBtn">市場總覽</button>
   <button type="button" id="navDispWatchBtn">處置股回檔觀察</button>
+  <span class="quick-nav-sep"></span>
+  <button type="button" id="navNewsBtn">📰 重要新聞</button>
 </nav>
 
-<section class="card" id="dailyWatchlistCard">
+<section class="card" id="homeTreemapCard">
+  <div class="row between" style="margin-bottom:8px">
+    <h2 style="margin:0">產業資金流向（今日）</h2>
+    <span style="font-size:11px; color:var(--text-muted)">面積＝成交值・顏色＝漲跌幅・點格子看該產業成分股（詳細版按上面「產業資金流向」）</span>
+  </div>
+  <div id="homeTreemapStatus" class="empty">載入中…</div>
+  <div id="homeTreemapLegend" class="treemap-legend"></div>
+  <div id="homeTreemapWrap" class="treemap-wrap"></div>
+</section>
+
+<section class="card" id="dailyWatchlistCard" style="display:none">
   <div class="row between" style="margin-bottom:4px">
     <h2 style="margin:0">📋 明日觀察清單</h2>
     <button id="genDailyWatchlistBtn" class="primary">產生清單</button>
@@ -376,8 +555,11 @@
   </div>
 </section>
 
-<section class="card" id="watchlistCard">
-  <h2>觀察清單（點擊卡片看走勢圖）</h2>
+<section class="card" id="watchlistCard" style="display:none">
+  <div class="row between" style="margin-bottom:4px">
+    <h2 style="margin:0">觀察清單（點擊卡片看走勢圖）</h2>
+    <button id="longScanBtn" type="button">⚡ 今日做多訊號掃描</button>
+  </div>
   <form id="watchlistForm" class="row">
     <div style="position:relative">
       <input type="text" id="codeInput" placeholder="輸入代碼或名稱，如 2330 或 台積電" maxlength="12" autocomplete="off">
@@ -389,14 +571,14 @@
   <div id="tilesEmpty" class="empty" style="display:none">尚未加入任何股票，輸入代碼並按「加入」開始追蹤。</div>
 </section>
 
-<section class="card" id="chartCard">
-  <div class="row between">
+<section class="card" id="chartCard" style="display:none">
+  <div class="row between" style="align-items:flex-start">
     <div>
       <div id="chartTitle">走勢圖</div>
       <div id="chartMeta">從觀察清單或下方列表點選一檔股票</div>
     </div>
-    <div class="row ranges">
-      <button id="intradayBtn" data-view="intraday">今日走勢（9:00-13:30）</button>
+    <div class="chart-periods ranges">
+      <button id="intradayBtn" data-view="intraday">今日走勢</button>
       <button data-months="1">1個月</button>
       <button data-months="3" class="active">3個月</button>
       <button data-months="6">6個月</button>
@@ -404,13 +586,18 @@
       <button data-months="60">5年</button>
       <button data-months="120">10年</button>
       <button data-months="240">20年</button>
-      <label style="display:flex; align-items:center; gap:5px; font-size:12.5px; color:var(--text-secondary); cursor:pointer; margin-left:4px">
-        <input type="checkbox" id="bollingerToggle">
-        布林通道（20,2）
-      </label>
-      <button id="intradayPatternBtn" type="button" style="margin-left:4px">📊 日內模式分析（近20日）</button>
-      <button id="patternAnalysisBtn" type="button">🕯️ K棒型態分析</button>
     </div>
+  </div>
+  <div class="chart-tools">
+    <label class="chart-tools-check">
+      <input type="checkbox" id="bollingerToggle">
+      布林通道（20,2）
+    </label>
+    <span class="chart-tools-sep"></span>
+    <button id="intradayPatternBtn" class="ghost" type="button">📊 日內模式分析</button>
+    <button id="patternAnalysisBtn" class="ghost" type="button">🕯️ K棒型態分析</button>
+    <button id="backtestBtn" class="ghost" type="button">📈 策略回測</button>
+    <button id="fundamentalsBtn" class="ghost" type="button">💰 基本面分析</button>
   </div>
   <div id="chartWrap">
     <svg id="chart" viewBox="0 0 900 260" preserveAspectRatio="none"></svg>
@@ -427,28 +614,50 @@
     <button id="toggleSectorBtn" class="primary">展開查看</button>
   </div>
   <div id="sectorFlowContent" style="display:none">
-    <div class="row between" style="margin-bottom:4px">
-      <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 10px; flex:1">
+    <div class="row" style="gap:8px; margin: 4px 0 10px">
+      <button id="sectorViewTreemapBtn" class="active" type="button">🔥 熱力圖</button>
+      <button id="sectorViewTodayBtn" type="button">今日排行</button>
+      <button id="sectorViewHeatmapBtn" type="button">20日趨勢</button>
+      <button id="refreshSectorBtn" style="margin-left:auto">重新整理</button>
+    </div>
+    <div id="sectorTreemapView">
+      <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 10px">
+        每一格是一個產業：<strong>面積＝今日成交值</strong>（越大代表資金越集中在這個產業），<strong>顏色＝今日成交值加權漲跌幅</strong>（紅漲綠跌，深淺代表幅度大小）。點格子可直接帶入下方選股的產業別篩選。
+      </p>
+      <div id="sectorTreemapStatus" class="empty">載入中…</div>
+      <div id="sectorTreemapLegend" class="treemap-legend"></div>
+      <div id="sectorTreemapWrap" class="treemap-wrap"></div>
+    </div>
+    <div id="sectorTodayView" style="display:none">
+      <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 10px">
         以「成交值加權漲跌幅」代表資金集中流入／流出的方向：數值越高代表資金越往該產業集中，越低代表資金流出該產業。點列可直接帶入下方選股的產業別篩選。
       </p>
-      <button id="refreshSectorBtn">重新整理</button>
+      <div id="sectorFlowStatus" class="empty">載入中…</div>
+      <div style="overflow-x:auto">
+        <table id="sectorFlowTable" style="display:none">
+          <thead>
+            <tr>
+              <th style="text-align:left" data-key="industry">產業別</th>
+              <th style="text-align:left">資金流向</th>
+              <th data-key="value_weighted_change_pct" class="sorted">成交值加權漲跌%</th>
+              <th data-key="advance">上漲</th>
+              <th data-key="decline">下跌</th>
+              <th data-key="stock_count">家數</th>
+              <th data-key="total_value_billion">成交值（億）</th>
+            </tr>
+          </thead>
+          <tbody id="sectorFlowBody"></tbody>
+        </table>
+      </div>
     </div>
-    <div id="sectorFlowStatus" class="empty">載入中…</div>
-    <div style="overflow-x:auto">
-      <table id="sectorFlowTable" style="display:none">
-        <thead>
-          <tr>
-            <th style="text-align:left" data-key="industry">產業別</th>
-            <th style="text-align:left">資金流向</th>
-            <th data-key="value_weighted_change_pct" class="sorted">成交值加權漲跌%</th>
-            <th data-key="advance">上漲</th>
-            <th data-key="decline">下跌</th>
-            <th data-key="stock_count">家數</th>
-            <th data-key="total_value_billion">成交值（億）</th>
-          </tr>
-        </thead>
-        <tbody id="sectorFlowBody"></tbody>
-      </table>
+    <div id="sectorHeatmapView" style="display:none">
+      <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 10px; line-height:1.6">
+        每次開啟這頁時，工具會把當天的產業資金流向存進本機檔案，累積成這張表格——沒有付費資料源可以直接查「過去N天的產業歷史」，
+        只能像大戶持股一樣靠每次使用慢慢累積，<strong>剛開始用的前幾天欄位會比較少，是正常現象，用得越久欄位越完整（最多累積20個交易日）</strong>。
+        顏色深淺代表當天成交值加權漲跌幅的大小，滑鼠移到格子上可以看到精確數字。
+      </p>
+      <div id="sectorHeatmapStatus" class="empty">載入中…</div>
+      <div id="sectorHeatmapScroll" style="overflow-x:auto"></div>
     </div>
   </div>
 </section>
@@ -523,15 +732,15 @@
   </div>
 </section>
 
-<section class="card" id="screenerCard">
+<section class="card" id="screenerCard" style="display:none">
   <div class="row between" style="margin-bottom:8px">
-    <h2 style="margin:0">選股：月線多頭 + 財務體質</h2>
+    <h2 style="margin:0">選股：拉回低接 + 財務體質</h2>
     <button id="runScreenerBtn" class="primary">開始篩選</button>
   </div>
   <div class="row screener-controls" style="margin-bottom:4px">
-    月線乖離
-    <input type="number" id="screenerPct" value="5" min="0.5" max="20" step="0.5">
-    % 以內
+    布林位階門檻
+    <input type="number" id="screenerPct" value="3" min="0" max="10" step="0.5">
+    以下（0=貼下軌，5.5=中軌）
     ・月線走勢確認
     <input type="number" id="screenerTrendDays" value="10" min="3" max="60" step="1">
     個交易日前
@@ -548,14 +757,22 @@
     </label>
   </div>
   <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
-    「月線走勢確認」是抓幾個交易日前的月線來比對現在，判斷月線是否在向上。天數越短（如 5）越早發現轉折，但容易被雜訊誤判；
-    天數越長（如 20 以上）訊號越穩，但會晚一點才抓到剛起漲的股票。<strong>一般抓 10～15 個交易日是比較平衡的預設值</strong>，
-    想抓早期轉折可以調到 5～8，想找已經穩定走多頭一段時間的可以調到 20。
+    找兩種拉回低接的股票，符合其一就會出現在清單裡：<strong>(A) 股價已經回檔到布林通道下軌附近</strong>
+    （位階 ≤ 門檻，0=貼著下軌，5.5=中軌），<strong>但月線本身還是走平或上揚</strong>——不是趨勢已經轉空的下殺，
+    是健康上升／盤整趨勢中的正常拉回；<strong>(B) 已經被公告處置的股票，股價也回檔到布林下軌附近</strong>——
+    處置生效後流動性變差、容易洗出浮額，位階夠低時也是常見的短線低接參考，但<strong>處置後也可能繼續破底</strong>，
+    不是「處置就一定會反彈」。表格最後一欄的「低接類型」會標示是哪一種。
+  </p>
+  <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
+    「月線走勢確認」是抓幾個交易日前的月線來比對現在，判斷月線是否走平或上揚（斜率 &lt; -1% 視為明顯下彎，不算數）。
+    天數越短（如 5）越早發現轉折，但容易被雜訊誤判；天數越長（如 20 以上）訊號越穩，但會晚一點才抓到剛止跌的股票。
+    <strong>一般抓 10～15 個交易日是比較平衡的預設值</strong>。
   </p>
   <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
     <strong>綜合評分</strong>：月營收月增／年增／累計年增是否為正、EPS 是否為正、月線斜率是否夠強、近20日籌碼是否偏多、
-    大戶人數是否增加，各符合一項 +1 分（滿分7），有處置或注意公告倒扣3分，「出貨風險」倒扣2分，「籌碼營收背離」倒扣2分，結果依評分高到低排序。
-    <strong>進場參考價</strong>是月線本身（拉回月線的常見技術面觀察位）。<strong>籌碼傾向</strong>是用近5／20日「上漲日成交量－下跌日成交量」
+    大戶人數是否增加，各符合一項 +1 分（滿分7）；若不是靠「處置回檔低接」入選卻意外中處置，倒扣3分，注意股倒扣1分；
+    「出貨風險」倒扣2分，「籌碼營收背離」倒扣2分，結果依評分高到低、再依布林位階低到高排序。
+    <strong>進場參考價</strong>是布林通道下軌本身（拉回低接的技術面觀察位）。<strong>籌碼傾向</strong>是用近5／20日「上漲日成交量－下跌日成交量」
     推算的近似代理指標，不是真正的券商分點主力進出（那需要付費資料）。<strong>大戶人數</strong>來自集保股權分散表（>1,000張），每週五更新，
     需要累積兩週資料才看得到增減；<strong>大戶人數低於5人時不列入評分</strong>（樣本太小，變化%沒有統計意義，表格會標「樣本少」）。
     <strong>籌碼營收背離</strong>：近20日籌碼明顯偏多但營收年增卻明顯衰退，代表買盤可能是題材面而非基本面撐起來的，視為警訊不加分。
@@ -577,8 +794,8 @@
           <th>綜合評分</th>
           <th>收盤</th>
           <th>月線</th>
-          <th>進場參考價</th>
-          <th>乖離%</th>
+          <th>進場參考價(下軌)</th>
+          <th>布林位階</th>
           <th>月線斜率%</th>
           <th>近20日籌碼傾向%</th>
           <th>大戶人數</th>
@@ -591,11 +808,12 @@
           <th>EPS（期別）</th>
           <th>本益比</th>
           <th>殖利率%</th>
+          <th style="text-align:left">低接類型</th>
           <th style="text-align:left">標記</th>
         </tr>
       </thead>
       <tbody id="screenerBody">
-        <tr><td colspan="21" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 30-60 秒）</td></tr>
+        <tr><td colspan="22" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 30-60 秒）</td></tr>
       </tbody>
     </table>
   </div>
@@ -608,40 +826,28 @@
   </div>
 </section>
 
-<section class="card" id="shortScreenerCard">
+<section class="card" id="shortScreenerCard" style="display:none">
   <div class="row between" style="margin-bottom:8px">
-    <h2 style="margin:0">選股：多頭轉弱（月線下彎）+ 放空篩選（短線 5～10 個交易日參考）</h2>
+    <h2 style="margin:0">放空篩選：脫離布林上軌＋隔天進處置</h2>
     <button id="runShortScreenerBtn" class="primary">開始篩選</button>
   </div>
   <div class="row screener-controls" style="margin-bottom:4px">
-    月線乖離
-    <input type="number" id="shortScreenerPct" value="5" min="0.5" max="20" step="0.5">
-    % 以內
-    ・月線走勢確認
-    <input type="number" id="shortScreenerTrendDays" value="7" min="3" max="60" step="1">
-    個交易日前
-    ・產業別
-    <select id="shortIndustryFilter"><option value="">全部</option></select>
-    ・近20日均成交值至少
-    <input type="number" id="shortScreenerMinTradeValue" value="3000" min="0" step="500">
+    近20日均成交值至少
+    <input type="number" id="shortScreenerMinTradeValue" value="1000" min="0" step="500">
     萬元
   </div>
   <p class="risk-notice">
     <strong>放空風險比作多更高，請務必先讀完再用：</strong>
     (1) 放空理論上虧損無上限（股價上漲沒有天花板），跟作多「最多賠光本金」不一樣，部位大小跟停損紀律要更嚴格。
     (2) 台股現股放空、融券放空都有法規限制（例如「平盤下不得放空」），這份清單只是統計篩選結果，<strong>不代表當下一定能夠成交或有券可以放空</strong>，實際下單以券商回報為準。
-    (3) 融券限額／餘額是<strong>前一交易日</strong>公告的資料，不是即時的，實際可用額度、券源仍可能變動或不足。
-    (4) 放空最大的風險是「軋空」——股價不跌反漲時，回補的買盤會讓漲勢更猛，這份清單有標示相關警示，但無法完全排除這個風險。
+    (3) 處置公告後股價不一定會跌，也可能軋空；處置期間撮合方式改變（人工管制、每筆委託收足全額價金），流動性會瞬間變差，進出場都更困難。
   </p>
   <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 8px; line-height:1.6">
-    這份抓的是<strong>月線已經確立向下彎</strong>的股票（不是股價剛跌破月線那種早期訊號），確認訊號比較穩，但相對地也比較晚進場、
-    可能已經跌一段。想抓更早期「剛出現轉弱訊號」的股票，可以看下面「高點反轉黑K」。
-    邏輯跟最上面「月線多頭＋財務體質」完全對稱，只是條件全部反過來：找月線走勢向下、營收/EPS/籌碼轉弱、大戶減碼的股票，
-    再用<strong>融資融券餘額表</strong>過濾掉沒辦法用融券放空的股票（融券限額為 0）。<strong>綜合評分</strong>：月營收月增／年增／累計年增為負、
-    EPS 為負、月線斜率明顯向下、近20日籌碼偏空、大戶人數減少、本益比偏高或近四季虧損，各符合一項 +1 分；估值已經便宜（本益比≤20）代表下檔有限、倒扣1分；
-    有處置或注意公告倒扣3分；「軋空風險」（均線仍在跌但籌碼轉多、大戶增加）倒扣2分；「籌碼背離」（籌碼明顯偏空但營收其實成長，可能只是超跌）倒扣2分；
-    「融券空間有限」（額度用超過80%）倒扣2分。結果依評分高到低排序。<strong>參考價</strong>是月線本身（技術面常見的反彈壓力參考，不是預測明天價格）。
-    以上全部是用已知公開資料計算的客觀統計，<strong>不是預測明天走勢，也不是放空訊號</strong>，請自行判斷風險。
+    邏輯：從證交所公告的處置股名單裡，找出<strong>下一個交易日就要開始被列為處置股</strong>的股票（用公告裡的處置期間起始日判斷），
+    再篩出其中<strong>收盤價已經高於布林通道上軌（20,2）</strong>的——處置生效當天撮合方式改成人工管制、流動性瞬間變差，
+    籌碼派對前一天股價通常已經被炒得偏離均值，是台股常見的短線放空切入參考日，但<strong>不保證一定下跌，處置後也可能軋空</strong>。
+    「乖離上軌%」是收盤價高出布林上軌的幅度，數字越大代表偏離越多。下一交易日判斷只算週六日順延，<strong>沒有排除國定假日</strong>，
+    遇連假前後可能會有落差。這是規則過濾出的觀察名單，不是進場建議。
   </p>
   <div id="shortScreenerStatus"></div>
   <div style="overflow-x:auto; margin-top:10px">
@@ -650,44 +856,22 @@
         <tr>
           <th style="text-align:left">代碼</th>
           <th style="text-align:left">名稱</th>
-          <th style="text-align:left">產業別</th>
-          <th>綜合評分</th>
           <th>收盤</th>
-          <th>月線</th>
-          <th>參考價</th>
-          <th>乖離%</th>
-          <th>月線斜率%</th>
-          <th>近20日籌碼傾向%</th>
-          <th>大戶人數</th>
-          <th>大戶人數變化</th>
+          <th>布林上軌</th>
+          <th>乖離上軌%</th>
           <th>近20日均成交值(萬)</th>
-          <th>月營收MoM%</th>
-          <th>月營收YoY%</th>
-          <th>累計營收YoY%</th>
-          <th>EPS（期別）</th>
-          <th>本益比</th>
-          <th>殖利率%</th>
-          <th>融券今日餘額</th>
-          <th>融券限額</th>
-          <th>融券使用率%</th>
-          <th style="text-align:left">標記</th>
+          <th style="text-align:left">處置起始日</th>
+          <th style="text-align:left">處置原因</th>
         </tr>
       </thead>
       <tbody id="shortScreenerBody">
-        <tr><td colspan="23" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 30-60 秒）</td></tr>
+        <tr><td colspan="8" class="empty">按「開始篩選」執行掃描</td></tr>
       </tbody>
     </table>
   </div>
-  <div id="shortScreenerPagination" class="row between" style="margin-top:10px; display:none">
-    <span id="shortScreenerPageInfo" style="font-size:12.5px; color:var(--text-secondary)"></span>
-    <div class="row" style="gap:8px">
-      <button id="shortScreenerPrevBtn" type="button">‹ 上一頁</button>
-      <button id="shortScreenerNextBtn" type="button">下一頁 ›</button>
-    </div>
-  </div>
 </section>
 
-<section class="card" id="reversalScreenerCard">
+<section class="card" id="reversalScreenerCard" style="display:none">
   <div class="row between" style="margin-bottom:8px">
     <h2 style="margin:0">選股：高點反轉黑K（放空早期觸發訊號）</h2>
     <button id="runReversalScreenerBtn" class="primary">開始篩選</button>
@@ -748,7 +932,7 @@
         </tr>
       </thead>
       <tbody id="reversalScreenerBody">
-        <tr><td colspan="22" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 30-90 秒）</td></tr>
+        <tr><td colspan="21" class="empty">按「開始篩選」執行掃描（首次掃描可能需要 30-90 秒）</td></tr>
       </tbody>
     </table>
   </div>
@@ -758,6 +942,59 @@
       <button id="reversalScreenerPrevBtn" type="button">‹ 上一頁</button>
       <button id="reversalScreenerNextBtn" type="button">下一頁 ›</button>
     </div>
+  </div>
+</section>
+
+<section class="card" id="newsCard" style="display:none">
+  <div class="row between" style="margin-bottom:8px">
+    <h2 style="margin:0">重要新聞</h2>
+    <span style="font-size:11px; color:var(--text-muted)">來源：工商時報（經 Google 新聞彙整，因官網會擋伺服器端直接抓取）</span>
+  </div>
+  <div id="newsStatus" class="empty">載入中…</div>
+  <ul id="newsList" class="news-list"></ul>
+</section>
+
+<section class="card" id="sectorStocksCard" style="display:none">
+  <div class="row between" style="margin-bottom:8px">
+    <h2 style="margin:0" id="sectorStocksTitle">產業成分股</h2>
+    <span style="font-size:11px; color:var(--text-muted)">依成交值排序・點股票看走勢圖</span>
+  </div>
+  <div class="row screener-controls" style="margin-bottom:8px; flex-wrap:wrap; gap:8px">
+    <label>策略
+      <select id="sectorSignalStrategy">
+        <option value="ma_cross">均線黃金/死亡交叉</option>
+        <option value="bollinger">布林通道回歸</option>
+        <option value="breakout">唐奇安通道突破</option>
+        <option value="macd">MACD 指標交叉</option>
+        <option value="kd">KD 隨機指標</option>
+        <option value="rsi">RSI 相對強弱指標</option>
+      </select>
+    </label>
+    <label>K線週期
+      <select id="sectorSignalTimeframe">
+        <option value="daily" selected>日K</option>
+        <option value="60m">60分K</option>
+        <option value="5m">5分K</option>
+      </select>
+    </label>
+    <button type="button" id="sectorSignalScanBtn" class="ghost">🔍 掃描做多／做空訊號</button>
+    <span id="sectorSignalNote" style="font-size:11px; color:var(--text-muted)"></span>
+  </div>
+  <div id="sectorStocksStatus" class="empty">載入中…</div>
+  <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">代碼</th>
+          <th style="text-align:left">名稱</th>
+          <th>收盤</th>
+          <th>漲跌%</th>
+          <th>成交值(億)</th>
+          <th>訊號</th>
+        </tr>
+      </thead>
+      <tbody id="sectorStocksBody"></tbody>
+    </table>
   </div>
 </section>
 
