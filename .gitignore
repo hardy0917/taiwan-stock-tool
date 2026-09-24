@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 tdcc_snapshots.json
 sector_flow_snapshots.json
+institutional_snapshots.json
+margin_history_snapshots.json
 server.log
 build/
 dist/

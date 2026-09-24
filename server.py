@@ -39,6 +39,7 @@ from fundamentals import fetch_fundamentals
 from disposition import fetch_disposition, fetch_disposition_pullback_watch, fetch_attention
 from screeners import run_screener, run_short_screener, run_reversal_short_screener
 from news import fetch_ctee_news
+from chips import fetch_stock_institutional_and_margin_history, fetch_margin_detail, analyze_chip_divergence
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -324,6 +325,22 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 months = int(qs.get("months", ["24"])[0])
                 self._send_json(fetch_fundamentals(code, months=months))
+                return
+
+            if parsed.path == "/api/chips":
+                code = qs.get("code", [""])[0].strip()
+                if not code:
+                    self._send_json({"error": "missing code"}, 400)
+                    return
+                days = max(3, min(int(qs.get("days", ["20"])[0]), 120))
+                history, margin_history = fetch_stock_institutional_and_margin_history(code, days=days)
+                self._send_json({
+                    "code": code,
+                    "history": history,
+                    "margin": fetch_margin_detail(code),
+                    "margin_history": margin_history,
+                    "divergence": analyze_chip_divergence(code, days=days, history=history),
+                })
                 return
 
             if parsed.path == "/api/holders":
