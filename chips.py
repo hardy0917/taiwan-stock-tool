@@ -22,7 +22,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
-from app_core import BASE_DIR, fetch_json, safe_float
+from app_core import BASE_DIR, atomic_write_json, fetch_json, safe_float
 from market_data import fetch_stock_daily_rows_for_chart
 
 INSTITUTIONAL_TTL = 3600 * 12  # 過去交易日的資料不會再變，長快取沒關係
@@ -66,10 +66,7 @@ def _load_snapshot_file(path):
 
 def _save_snapshot_file(path, snapshots):
     with _snapshot_lock:
-        try:
-            path.write_text(json.dumps(snapshots, ensure_ascii=False), encoding="utf-8")
-        except OSError:
-            pass
+        atomic_write_json(path, snapshots)
 
 
 def _fetch_institutional_day_full(date_str):

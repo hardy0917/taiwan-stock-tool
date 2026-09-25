@@ -6,9 +6,10 @@
 避免用到當下還沒發生的價格（look-ahead bias）。這是歷史資料的回溯統計，不代表未來報酬，
 也沒有考慮滑價、無法成交（跌停鎖死等）等實務限制。
 """
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from app_core import safe_float
+from app_core import safe_float, cached_call
 from market_data import (
     fetch_stock_daily_rows_for_chart,
     fetch_stock_daily_rows,
@@ -509,13 +510,31 @@ def run_live_signal(code, timeframe="daily", strategy="ma_cross", params=None, m
     }
 
 
+_scan_cache = {}
+_scan_lock = threading.Lock()
+SCAN_CACHE_TTL = 90  # 短TTL：這是「即時」訊號掃描，但公開給很多人用時同一批代碼
+                      # 短時間內被很多人重複掃描的機率很高，加短快取＋single-flight
+                      # 避免同一批代碼被同時掃好幾次（codes 是使用者輸入、沒有上限，
+                      # 是目前風險最高的一個端點，見 /api/backtest_scan 的數量上限）
+
+
 def scan_backtest_buy_signals(codes, timeframe="daily", strategy="ma_cross", params=None,
                                months=24, days=30, min_volume_lots=1000):
     """量化做多掃描：對一組股票（通常是使用者的觀察清單）各自跑一次即時訊號判斷，
     並用近5個交易日平均成交量（張）做流動性門檻，避免挑到量小、進出場會打到自己
     價格的股票。回傳全部結果（含未通過的），由前端決定要不要只顯示『可進場』的。"""
     params = params or {}
+    cache_key = (
+        tuple(sorted(codes)), timeframe, strategy,
+        tuple(sorted(params.items())), months, days, min_volume_lots,
+    )
+    return cached_call(
+        _scan_cache, _scan_lock, cache_key, SCAN_CACHE_TTL,
+        lambda: _scan_backtest_buy_signals_impl(codes, timeframe, strategy, params, months, days, min_volume_lots),
+    )
 
+
+def _scan_backtest_buy_signals_impl(codes, timeframe, strategy, params, months, days, min_volume_lots):
     def check_one(code):
         sig = run_live_signal(code, timeframe=timeframe, strategy=strategy, params=params,
                                months=months, days=days)

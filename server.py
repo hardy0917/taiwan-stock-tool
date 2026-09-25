@@ -15,16 +15,14 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from app_core import PORT, STATIC_DIR, check_backend_health, fetch_json
+from app_core import PORT, STATIC_DIR, check_backend_health
 from patterns import detect_candlestick_patterns, analyze_volume_trend
 from market_data import (
-    parse_mis_quote,
-    fetch_indices,
+    fetch_quotes_for_codes,
     fetch_index_daily_rows,
     fetch_stock_daily_rows_for_chart,
     fetch_intraday,
     fetch_intraday_pattern,
-    fetch_stock_directory,
 )
 from backtest import (
     _backtest_params_from_qs,
@@ -33,13 +31,36 @@ from backtest import (
     run_live_signal,
     scan_backtest_buy_signals,
 )
-from holders import get_holder_data
-from sector_flow import fetch_sector_flow, build_sector_flow_heatmap, fetch_sector_stocks
+from sector_flow import build_sector_flow_heatmap, fetch_sector_stocks
 from fundamentals import fetch_fundamentals
-from disposition import fetch_disposition, fetch_disposition_pullback_watch, fetch_attention
 from screeners import run_screener, run_short_screener, run_reversal_short_screener
-from news import fetch_ctee_news
 from chips import fetch_stock_institutional_and_margin_history, fetch_margin_detail, analyze_chip_divergence
+import scheduler
+
+MAX_BACKTEST_SCAN_CODES = 150  # 使用者輸入、沒有上限的話是最容易被濫用來打爆上游的端點
+
+# 組好的 JS bundle 快取在記憶體裡，key 是所有原始檔案裡最新的修改時間——正式環境
+# 檔案不會變，每個請求都是直接回傳快取，不用再重讀+串接13-14支檔案；本機開發時
+# 改了任何一支 js 檔案，mtime 會變，下一個請求自動重新組一次，不用額外的 dev/prod
+# 開關，也不會忘記切換。
+_js_bundle_cache = {"mtime": None, "body": b""}
+_js_bundle_lock = threading.Lock()
+
+
+def _build_js_bundle():
+    js_dir = STATIC_DIR / "js"
+    files = sorted(js_dir.glob("*.js"))
+    latest_mtime = max((p.stat().st_mtime for p in files), default=0)
+    with _js_bundle_lock:
+        if _js_bundle_cache["mtime"] == latest_mtime and _js_bundle_cache["body"]:
+            return _js_bundle_cache["body"]
+    # 每個檔案本身已經以換行結尾，直接相接就好，不用再插入換行
+    parts = [p.read_text(encoding="utf-8") for p in files]
+    body = "".join(parts).encode("utf-8")
+    with _js_bundle_lock:
+        _js_bundle_cache["mtime"] = latest_mtime
+        _js_bundle_cache["body"] = body
+    return body
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -71,10 +92,7 @@ class Handler(BaseHTTPRequestHandler):
         """前端原始碼拆成 static/js/ 底下多個依編號排序的檔案（方便維護／導覽），
         但瀏覽器仍然只拿到一支合併後的 app.js——這些檔案原本就是同一個大 IIFE
         的內部區塊，靠檔名編號串接回單一執行環境，語意跟拆檔前完全一樣。"""
-        js_dir = STATIC_DIR / "js"
-        # 每個檔案本身已經以換行結尾，直接相接就好，不用再插入換行
-        parts = [p.read_text(encoding="utf-8") for p in sorted(js_dir.glob("*.js"))]
-        body = "".join(parts).encode("utf-8")
+        body = _build_js_bundle()
         self.send_response(200)
         self.send_header("Content-Type", "application/javascript; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -101,29 +119,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not codes:
                     self._send_json({"error": "missing codes"}, 400)
                     return
-                # 同時嘗試上市(tse)與上櫃(otc)，證交所 MIS 會忽略查不到的代碼
-                ex_list = []
-                for c in codes:
-                    ex_list.append(f"tse_{c}.tw")
-                    ex_list.append(f"otc_{c}.tw")
-                url = ("https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch="
-                       + urllib.parse.quote("|".join(ex_list)) + "&json=1&delay=0")
-                raw = fetch_json(url, ttl=5)
-                quotes = parse_mis_quote(raw)
-                # 每檔代碼只留第一筆有效資料（tse 優先）
-                merged = {}
-                for q in quotes:
-                    if q["code"] not in merged or (merged[q["code"]]["price"] is None and q["price"] is not None):
-                        merged[q["code"]] = q
-                self._send_json({"quotes": [merged[c] for c in codes if c in merged]})
+                self._send_json({"quotes": fetch_quotes_for_codes(codes)})
                 return
 
             if parsed.path == "/api/health":
-                self._send_json({"ok": check_backend_health(), "checked_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+                self._send_json({
+                    "ok": check_backend_health(),
+                    "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "stale_jobs": scheduler.stale_job_names(),
+                })
                 return
 
             if parsed.path == "/api/indices":
-                self._send_json(fetch_indices())
+                self._send_json(scheduler.get("indices", {}))
                 return
 
             if parsed.path == "/api/index_history":
@@ -137,13 +145,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/day_all":
-                url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
-                data = fetch_json(url, ttl=300)
-                self._send_json({"data": data})
+                self._send_json({"data": scheduler.get("day_all", [])})
                 return
 
             if parsed.path == "/api/stock_directory":
-                self._send_json({"data": fetch_stock_directory()})
+                self._send_json({"data": scheduler.get("stock_directory", [])})
                 return
 
             if parsed.path == "/api/history":
@@ -234,6 +240,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not codes:
                     self._send_json({"error": "missing codes"}, 400)
                     return
+                if len(codes) > MAX_BACKTEST_SCAN_CODES:
+                    self._send_json(
+                        {"error": f"最多一次掃描 {MAX_BACKTEST_SCAN_CODES} 檔，請減少代碼數量"}, 400)
+                    return
                 strategy = qs.get("strategy", ["ma_cross"])[0].strip()
                 timeframe = qs.get("timeframe", ["daily"])[0].strip()
                 months = int(qs.get("months", ["24"])[0])
@@ -299,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/sector_flow":
-                self._send_json({"data": fetch_sector_flow(), "generated_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+                self._send_json({"data": scheduler.get("sector_flow", []), "generated_at": time.strftime("%Y-%m-%d %H:%M:%S")})
                 return
 
             if parsed.path == "/api/sector_flow_history":
@@ -315,7 +325,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/news":
-                self._send_json({"data": fetch_ctee_news()})
+                self._send_json({"data": scheduler.get("news", [])})
                 return
 
             if parsed.path == "/api/fundamentals":
@@ -348,7 +358,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not code:
                     self._send_json({"error": "missing code"}, 400)
                     return
-                holders = get_holder_data().get(code)
+                holders = scheduler.get("holders", {}).get(code)
                 if holders is None:
                     self._send_json({"code": code, "error": "not found"})
                     return
@@ -356,21 +366,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/disposition":
-                disp = fetch_disposition()
+                disp = scheduler.get("disposition", {})
                 rows = [{"code": c, **v} for c, v in disp.items()]
                 self._send_json({"data": rows})
                 return
 
             if parsed.path == "/api/disposition_watch":
                 self._send_json({
-                    "data": fetch_disposition_pullback_watch(),
+                    "data": scheduler.get("disposition_watch", []),
                     "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 })
                 return
 
             if parsed.path == "/api/attention":
-                att = fetch_attention()
-                self._send_json({"data": sorted(att)})
+                self._send_json({"data": scheduler.get("attention", [])})
                 return
 
             self._send_json({"error": "not found"}, 404)
@@ -386,6 +395,8 @@ def main():
         print(f"請直接開啟瀏覽器連到 http://localhost:{PORT} ，或關閉舊的視窗後再試一次。")
         input("按 Enter 鍵關閉視窗...")
         return
+    print("正在預熱背景資料快取…")
+    scheduler.start()
     url = f"http://localhost:{PORT}"
     print(f"台股分析工具已啟動: {url}")
     print("按 Ctrl+C 停止伺服器（關閉這個視窗也會停止）")

@@ -7,7 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from app_core import safe_float, fetch_json
+from app_core import safe_float, fetch_json, cached_call
 from indicators import compute_ma20_series, compute_bollinger_now, compute_volume_bias
 from market_data import fetch_market_snapshot, fetch_stock_daily_rows
 from fundamentals import fetch_monthly_revenue, fetch_eps, fetch_valuation
@@ -49,11 +49,13 @@ def run_screener(boll_level_threshold=3.0, trend_days=10, long_term=False, min_t
         籌碼容易洗出浮額，位階夠低時也是常見的短線低接切入參考。
     兩種都只是規則過濾出的觀察名單，不是預測、不是買進訊號。"""
     cache_key = (round(boll_level_threshold, 2), trend_days, bool(long_term), int(min_trade_value))
-    with _screener_lock:
-        hit = _screener_cache.get(cache_key)
-        if hit and time.time() - hit[0] < 1800:
-            return hit[1]
+    return cached_call(
+        _screener_cache, _screener_lock, cache_key, 1800,
+        lambda: _run_screener_impl(boll_level_threshold, trend_days, long_term, min_trade_value),
+    )
 
+
+def _run_screener_impl(boll_level_threshold, trend_days, long_term, min_trade_value):
     snapshot = fetch_market_snapshot()
     disposition_map = fetch_disposition()
 
@@ -273,8 +275,6 @@ def run_screener(boll_level_threshold=3.0, trend_days=10, long_term=False, min_t
         "candidates_scanned": len(candidates) + len(disposition_map),
         "results": results,
     }
-    with _screener_lock:
-        _screener_cache[cache_key] = (time.time(), payload)
     return payload
 
 
@@ -329,11 +329,13 @@ def run_short_screener(min_trade_value=0):
     股價通常已經被炒得偏離均值，是台股常見的短線放空切入參考日，但不保證一定
     下跌，處置後也可能軋空。這是規則過濾出的觀察名單，不是進場建議。"""
     cache_key = int(min_trade_value)
-    with _short_screener_lock:
-        hit = _short_screener_cache.get(cache_key)
-        if hit and time.time() - hit[0] < 900:
-            return hit[1]
+    return cached_call(
+        _short_screener_cache, _short_screener_lock, cache_key, 900,
+        lambda: _run_short_screener_impl(min_trade_value),
+    )
 
+
+def _run_short_screener_impl(min_trade_value):
     disposition_map = fetch_disposition()
     next_day = _next_trading_day_roc()
     upcoming = {
@@ -381,8 +383,6 @@ def run_short_screener(min_trade_value=0):
         "disposition_candidates_scanned": len(upcoming),
         "results": results,
     }
-    with _short_screener_lock:
-        _short_screener_cache[cache_key] = (time.time(), payload)
     return payload
 
 
@@ -421,11 +421,13 @@ def run_reversal_short_screener(near_high_pct=3.0, min_shadow_ratio=1.0, min_tra
     融券資料只當輔助確認，主要訊號是當天這根K棒的型態本身。跟其他篩選器一樣，
     這是對已發生K棒型態的客觀統計，不是對明天走勢的預測。"""
     cache_key = (round(near_high_pct, 2), round(min_shadow_ratio, 2), int(min_trade_value))
-    with _reversal_screener_lock:
-        hit = _reversal_screener_cache.get(cache_key)
-        if hit and time.time() - hit[0] < 1800:
-            return hit[1]
+    return cached_call(
+        _reversal_screener_cache, _reversal_screener_lock, cache_key, 1800,
+        lambda: _run_reversal_short_screener_impl(near_high_pct, min_shadow_ratio, min_trade_value),
+    )
 
+
+def _run_reversal_short_screener_impl(near_high_pct, min_shadow_ratio, min_trade_value):
     ohlc = fetch_today_ohlc_snapshot()
 
     # 第一階段：光用今天的開高低收就能算出「上影線黑K」，完全不用額外打 API，
@@ -580,6 +582,4 @@ def run_reversal_short_screener(near_high_pct=3.0, min_shadow_ratio=1.0, min_tra
         "candidates_scanned": len(candidates),
         "results": results,
     }
-    with _reversal_screener_lock:
-        _reversal_screener_cache[cache_key] = (time.time(), payload)
     return payload

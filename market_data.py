@@ -4,12 +4,13 @@
 不含任何選股/評分邏輯。
 """
 import json
+import threading
 import time
 import urllib.parse
 import urllib.request
 from collections import Counter
 
-from app_core import HEADERS, fetch_json, safe_float
+from app_core import HEADERS, fetch_json, safe_float, throttled_urlopen
 
 
 def parse_mis_quote(raw):
@@ -46,6 +47,51 @@ def parse_mis_quote(raw):
             "date": item.get("d"),
         })
     return out
+
+
+# 逐代碼快取，不是逐個「查詢字串」快取：不同使用者的觀察清單常常重疊
+# （2330、2317這種常見代碼幾乎人人都有），用代碼當 key 才能讓大家共用同一份快取，
+# 不然像以前把整串代碼串成一個 URL 當 key，兩個使用者的代碼清單只要順序或組合
+# 不完全一樣，就會被當成不同的查詢，等於每次都是即時查。
+_quote_cache = {}  # code -> (timestamp, quote)
+_quote_cache_lock = threading.Lock()
+QUOTE_TTL = 8
+
+
+def fetch_quotes_for_codes(codes):
+    """查一批股票代碼的即時報價，只對「快取已經過期的代碼」才真的發請求給證交所，
+    新鮮的直接從快取回傳。"""
+    now = time.time()
+    fresh = {}
+    stale_codes = []
+    with _quote_cache_lock:
+        for code in codes:
+            hit = _quote_cache.get(code)
+            if hit and now - hit[0] < QUOTE_TTL:
+                fresh[code] = hit[1]
+            else:
+                stale_codes.append(code)
+
+    if stale_codes:
+        ex_list = []
+        for c in stale_codes:
+            ex_list.append(f"tse_{c}.tw")
+            ex_list.append(f"otc_{c}.tw")
+        url = ("https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch="
+               + urllib.parse.quote("|".join(ex_list)) + "&json=1&delay=0")
+        raw = fetch_json(url, ttl=QUOTE_TTL)
+        quotes = parse_mis_quote(raw)
+        merged = {}
+        for q in quotes:
+            # 每檔代碼只留第一筆有效資料（tse 優先於 otc，跟原本的合併邏輯一致）
+            if q["code"] not in merged or (merged[q["code"]]["price"] is None and q["price"] is not None):
+                merged[q["code"]] = q
+        with _quote_cache_lock:
+            for code, q in merged.items():
+                _quote_cache[code] = (now, q)
+        fresh.update(merged)
+
+    return [fresh[c] for c in codes if c in fresh]
 
 
 # ---------- 大盤／櫃買／費半／台指期指數 ----------
@@ -100,7 +146,7 @@ def fetch_txf_futures():
             data=b'{"MarketType":"0","SymbolType":"F","KindID":"1"}',
             headers={**HEADERS, "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with throttled_urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         quotes = ((data.get("RtData") or {}).get("QuoteList")) or []
         txf = next((q for q in quotes if q.get("SymbolID") == "TXF-S"), None)
@@ -497,3 +543,9 @@ def fetch_market_snapshot():
             continue
         out[code] = {"name": row.get("Name", ""), "close": close, "monthly_avg": ma}
     return out
+
+
+def fetch_stock_day_all():
+    """全市場今日成交資訊原始資料（STOCK_DAY_ALL），給 /api/day_all 用；
+    抽成獨立函式讓排程可以直接呼叫，不用在 server.py 裡硬寫 URL。"""
+    return fetch_json("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", ttl=300)

@@ -5,7 +5,7 @@
 import json
 import threading
 
-from app_core import BASE_DIR, fetch_json, safe_float
+from app_core import BASE_DIR, atomic_write_json, fetch_json, safe_float
 from fundamentals import fetch_monthly_revenue
 
 SECTOR_FLOW_SNAPSHOT_FILE = BASE_DIR / "sector_flow_snapshots.json"
@@ -45,10 +45,7 @@ def _save_sector_flow_snapshot(trade_date, results):
         # 只保留最近 N 個交易日，避免檔案無限長大
         for old_date in sorted(snapshots.keys())[:-SECTOR_FLOW_HISTORY_DAYS]:
             del snapshots[old_date]
-        try:
-            SECTOR_FLOW_SNAPSHOT_FILE.write_text(json.dumps(snapshots, ensure_ascii=False), encoding="utf-8")
-        except OSError:
-            pass
+        atomic_write_json(SECTOR_FLOW_SNAPSHOT_FILE, snapshots)
 
 
 def load_sector_flow_history():

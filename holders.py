@@ -5,7 +5,7 @@
 import json
 import threading
 
-from app_core import BASE_DIR, fetch_text, safe_float
+from app_core import BASE_DIR, atomic_write_json, fetch_text, safe_float
 
 TDCC_SNAPSHOT_FILE = BASE_DIR / "tdcc_snapshots.json"
 BIG_HOLDER_BRACKET = "15"  # TDCC 標準持股分級：15 = 1,000,001股以上，一般俗稱「大戶（1,000張以上）」
@@ -59,10 +59,7 @@ def get_holder_data():
                 "latest_date": report_date, "latest": current,
                 "prev_date": prev_date, "prev": prev,
             }
-            try:
-                TDCC_SNAPSHOT_FILE.write_text(json.dumps(snapshots, ensure_ascii=False), encoding="utf-8")
-            except OSError:
-                pass
+            atomic_write_json(TDCC_SNAPSHOT_FILE, snapshots)
 
         out = {}
         for code, v in current.items():

@@ -1,0 +1,47 @@
+# 反向代理設定範本：處理 HTTPS、靜態檔快取、每個 IP 的請求速率限制。
+# server.py 本身只綁 127.0.0.1:8787，不要直接對外——所有對外流量都先經過這裡。
+#
+# 使用方式：把 your-domain / 憑證路徑換成你自己的，放到
+# /etc/nginx/sites-available/taiwanstocktool，再軟連結到 sites-enabled，
+# nginx -t 測試設定沒問題後 systemctl reload nginx。
+
+limit_req_zone $binary_remote_addr zone=api:10m rate=5r/s;
+limit_conn_zone $binary_remote_addr zone=addr:10m;
+
+server {
+    listen 80;
+    server_name your-domain;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your-domain;
+
+    ssl_certificate     /etc/letsencrypt/live/your-domain/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain/privkey.pem;
+
+    # app.js 本身已經在 server.py 裡依檔案修改時間快取（沒改過就是同一份 bytes），
+    # 這裡再讓 nginx 短暫快取一次，減少打到 Python process 的次數。
+    location /app.js {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_cache_valid 200 60s;
+    }
+
+    # 所有 API 都限速——單一 IP 每秒最多 5 個請求，尖峰可以爆衝到 20 個（burst），
+    # 超過的話 nginx 直接擋掉，不會打到後面的 Python process，
+    # 也保護不會有單一使用者（或壞掉的前端輪詢迴圈）把伺服器資源吃光。
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+        limit_conn addr 10;
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}

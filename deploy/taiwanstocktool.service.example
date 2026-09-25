@@ -1,0 +1,26 @@
+# systemd unit 範本：讓伺服器當背景服務跑、當掉自動重啟、開機自動啟動。
+#
+# 使用方式：
+#   1. 把這支檔案複製到 /etc/systemd/system/taiwanstocktool.service
+#      （WorkingDirectory/User 換成你實際部署的路徑跟帳號）
+#   2. sudo systemctl daemon-reload
+#   3. sudo systemctl enable --now taiwanstocktool
+#   4. 看 log：journalctl -u taiwanstocktool -f
+
+[Unit]
+Description=TaiwanStockTool
+After=network.target
+
+[Service]
+User=taiwanstock
+WorkingDirectory=/opt/taiwanstocktool
+ExecStart=/usr/bin/python3 server.py
+Restart=on-failure
+RestartSec=5
+
+# 全域對外流量閥上限，避免高併發時把證交所/櫃買中心打到限流——見 app_core.py
+# 的 OUTBOUND_CONCURRENCY。要臨時關閉除錯用的統計輸出可以把 TST_DEBUG_STATS 拿掉。
+Environment=TST_OUTBOUND_CONCURRENCY=10
+
+[Install]
+WantedBy=multi-user.target
