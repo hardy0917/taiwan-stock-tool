@@ -183,6 +183,13 @@
     const input = $("#codeInput");
     const code = input.value.trim();
     if (!code) return;
+    // 代碼目錄載入好的話先驗證：輸入不存在的代碼（打錯字、或自動完成沒選到就送出）
+    // 加進觀察清單，不只是那一檔股票查不到報價——證交所報價 API 是整批一起查，
+    // 混進一個不存在的代碼會讓「同一批」裡其他原本正常的股票也一起查不到。
+    if (stockDirectory.length && !stockDirectory.some((s) => s.code === code)) {
+      renderCodeSuggestions([]);
+      return;
+    }
     if (!state.watchlist.includes(code)) {
       state.watchlist.push(code);
       saveWatchlist();

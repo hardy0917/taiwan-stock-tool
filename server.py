@@ -119,7 +119,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not codes:
                     self._send_json({"error": "missing codes"}, 400)
                     return
-                self._send_json({"quotes": fetch_quotes_for_codes(codes)})
+                # MIS 的批次報價 API 有個地雷：整批代碼裡只要有一個是不存在／打錯的代碼，
+                # 會讓「整批」都查不到（rtcode 9999），不是只有那一個代碼查不到而已。
+                # 先用股票代碼目錄把明顯不存在的代碼濾掉，避免使用者觀察清單裡不小心
+                # 混進一個壞掉的代碼，就害其他原本正常的股票也一起卡在「讀取中」。
+                valid_codes_set = {row["code"] for row in scheduler.get("stock_directory", [])}
+                codes_to_query = [c for c in codes if c in valid_codes_set] if valid_codes_set else codes
+                self._send_json({"quotes": fetch_quotes_for_codes(codes_to_query)})
                 return
 
             if parsed.path == "/api/health":
